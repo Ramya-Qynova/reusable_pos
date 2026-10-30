@@ -61,9 +61,20 @@ export const API_ENDPOINTS = {
   customers: {
     list: '/api/v1/customers',
     create: '/api/v1/customers',
+    details: (id: number | string) => `/api/v1/customers/${id}`,
+    update: (id: number | string) => `/api/v1/customers/${id}`,
+    delete: (id: number | string) => `/api/v1/customers/${id}`,
+    toggleStatus: (id: number | string) => `/api/v1/customers/${id}/toggle-status`,
+    nextCode: '/api/v1/customers/next-code',
   },
   suppliers: {
     list: '/api/v1/suppliers',
+    create: '/api/v1/suppliers',
+    details: (id: number | string) => `/api/v1/suppliers/${id}`,
+    update: (id: number | string) => `/api/v1/suppliers/${id}`,
+    delete: (id: number | string) => `/api/v1/suppliers/${id}`,
+    toggleStatus: (id: number | string) => `/api/v1/suppliers/${id}/toggle-status`,
+    nextCode: '/api/v1/suppliers/next-code',
     purchases: '/api/v1/purchases',
   },
   sync: {

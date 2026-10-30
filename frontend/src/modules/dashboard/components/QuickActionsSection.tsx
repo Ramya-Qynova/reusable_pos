@@ -51,7 +51,7 @@ export const QuickActionsSection: React.FC = () => {
     {
       id: 'add_customer',
       label: 'Add Customer',
-      hint: 'Enroll buyer profile & loyalty',
+      hint: 'Enroll customer profile & credit',
       path: '/customers',
       icon: <UserPlus className="w-4 h-4 sm:w-4.5 sm:h-4.5" />,
       bg: 'bg-purple-50/70 hover:bg-purple-100/70',

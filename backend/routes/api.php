@@ -3,8 +3,10 @@
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BranchController;
 use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\SettingsController;
+use App\Http\Controllers\Api\V1\SupplierController;
 use App\Http\Controllers\Api\V1\UnitController;
 use Illuminate\Support\Facades\Route;
 
@@ -48,6 +50,16 @@ Route::prefix('v1')->group(function () {
         Route::get('/products/barcode/{barcode}', [ProductController::class, 'barcodeLookup']);
         Route::get('/products/{product}', [ProductController::class, 'show']);
 
+        // Customers Master (Reading)
+        Route::get('/customers', [CustomerController::class, 'index']);
+        Route::get('/customers/next-code', [CustomerController::class, 'nextCode']);
+        Route::get('/customers/{customer}', [CustomerController::class, 'show']);
+
+        // Suppliers Master (Reading)
+        Route::get('/suppliers', [SupplierController::class, 'index']);
+        Route::get('/suppliers/next-code', [SupplierController::class, 'nextCode']);
+        Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
+
         // Mutating Catalog Operations (Guarded by catalog.manage permission)
         Route::middleware('permission:catalog.manage')->group(function () {
             // Category mutations
@@ -65,6 +77,22 @@ Route::prefix('v1')->group(function () {
             Route::match(['put', 'patch'], '/products/{product}', [ProductController::class, 'update']);
             Route::delete('/products/{product}', [ProductController::class, 'destroy']);
             Route::post('/products/{product}/branch-price', [ProductController::class, 'setBranchPrice']);
+        });
+
+        // Mutating Customers Operations (Guarded by customers.manage permission)
+        Route::middleware('permission:customers.manage')->group(function () {
+            Route::post('/customers', [CustomerController::class, 'store']);
+            Route::match(['put', 'patch'], '/customers/{customer}', [CustomerController::class, 'update']);
+            Route::delete('/customers/{customer}', [CustomerController::class, 'destroy']);
+            Route::post('/customers/{customer}/toggle-status', [CustomerController::class, 'toggleStatus']);
+        });
+
+        // Mutating Suppliers Operations (Guarded by suppliers.manage permission)
+        Route::middleware('permission:suppliers.manage')->group(function () {
+            Route::post('/suppliers', [SupplierController::class, 'store']);
+            Route::match(['put', 'patch'], '/suppliers/{supplier}', [SupplierController::class, 'update']);
+            Route::delete('/suppliers/{supplier}', [SupplierController::class, 'destroy']);
+            Route::post('/suppliers/{supplier}/toggle-status', [SupplierController::class, 'toggleStatus']);
         });
 
         // Operational routes requiring validated active branch context

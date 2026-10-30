@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Store,
   MapPin,
@@ -9,6 +10,7 @@ import {
   Package,
   Receipt,
   User,
+  Building2,
   ArrowRight,
 } from 'lucide-react'
 import { useConfig } from '../../context/ConfigContext'
@@ -40,9 +42,11 @@ const SEARCHABLE_ITEMS = [
   { type: 'order', title: 'Order #ORD-98234', code: '₹1,450.00', detail: 'Cash • Completed • 10:45 AM' },
   { type: 'order', title: 'Order #ORD-98233', code: '₹820.00', detail: 'UPI / QR • Completed • 10:32 AM' },
   { type: 'order', title: 'Order #ORD-98232', code: '₹3,120.00', detail: 'Card • Completed • 10:14 AM' },
-  { type: 'customer', title: 'John Doe', code: '+91 98111 22334', detail: '150 Loyalty Pts • Regular' },
-  { type: 'customer', title: 'Sarah Jenkins', code: '+91 98222 33445', detail: '420 Loyalty Pts • VIP' },
+  { type: 'customer', title: 'John Doe', code: '+91 98111 22334', detail: 'Regular Buyer • Active' },
+  { type: 'customer', title: 'Sarah Jenkins', code: '+91 98222 33445', detail: 'Frequent Buyer • Active' },
   { type: 'customer', title: 'TechCorp Solutions', code: '+91 98777 66554', detail: 'Credit Account • ₹14,500' },
+  { type: 'supplier', title: 'Fresh Farm Agro Wholesale', code: 'SUP-00001', detail: 'Fresh Produce Vendor • Active' },
+  { type: 'supplier', title: 'Supreme Dairy & Poultry Co.', code: 'SUP-00002', detail: 'Dairy & Eggs Supplier • Active' },
 ]
 
 export interface DashboardHeaderProps {
@@ -54,6 +58,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   selectedDate,
   onDateChange,
 }) => {
+  const navigate = useNavigate()
   const { client, updateBranch } = useConfig()
   const { showNotification } = useNotification()
 
@@ -274,6 +279,13 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                         type: 'info',
                       })
                       setIsSearchFocused(false)
+                      if (item.type === 'customer') {
+                        navigate('/customers')
+                      } else if (item.type === 'supplier') {
+                        navigate('/suppliers')
+                      } else if (item.type === 'product') {
+                        navigate('/products')
+                      }
                     }}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -281,6 +293,7 @@ export const DashboardHeader: React.FC<DashboardHeaderProps> = ({
                         {item.type === 'product' && <Package className="w-3.5 h-3.5" />}
                         {item.type === 'order' && <Receipt className="w-3.5 h-3.5" />}
                         {item.type === 'customer' && <User className="w-3.5 h-3.5" />}
+                        {item.type === 'supplier' && <Building2 className="w-3.5 h-3.5" />}
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs sm:text-[13px] font-semibold text-slate-800 group-hover:text-[#D45060] transition-colors truncate">

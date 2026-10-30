@@ -7,10 +7,12 @@ use App\Models\BranchProductPrice;
 use App\Models\BusinessFeature;
 use App\Models\BusinessProfile;
 use App\Models\Category;
+use App\Models\Customer;
 use App\Models\Permission;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\Role;
+use App\Models\Supplier;
 use App\Models\TaxSlab;
 use App\Models\Unit;
 use App\Models\User;
@@ -169,6 +171,7 @@ class DatabaseSeeder extends Seeder
             ['slug' => 'inventory.transfer', 'module' => 'inventory', 'description' => 'Dispatch and receive inter-branch transfers'],
             ['slug' => 'purchases.manage', 'module' => 'purchases', 'description' => 'Create POs and record GRN receipts'],
             ['slug' => 'customers.manage', 'module' => 'customers', 'description' => 'Manage customer profiles and credit limits'],
+            ['slug' => 'suppliers.manage', 'module' => 'suppliers', 'description' => 'Manage supplier profiles and vendor directory'],
             ['slug' => 'reports.view_pnl', 'module' => 'reports', 'description' => 'View P&L and financial statements'],
             ['slug' => 'settings.manage', 'module' => 'settings', 'description' => 'Manage store profile and hardware setup'],
         ];
@@ -177,7 +180,7 @@ class DatabaseSeeder extends Seeder
             $createdPerm = Permission::updateOrCreate(['slug' => $perm['slug']], $perm);
             $adminRole->permissions()->syncWithoutDetaching([$createdPerm->id]);
 
-            if (in_array($perm['slug'], ['pos.billing', 'pos.discount', 'pos.returns', 'cash.drawer', 'inventory.adjust', 'inventory.transfer', 'reports.view_pnl'])) {
+            if (in_array($perm['slug'], ['pos.billing', 'pos.discount', 'pos.returns', 'cash.drawer', 'inventory.adjust', 'inventory.transfer', 'reports.view_pnl', 'customers.manage', 'suppliers.manage'])) {
                 $managerRole->permissions()->syncWithoutDetaching([$createdPerm->id]);
             }
 
@@ -189,7 +192,7 @@ class DatabaseSeeder extends Seeder
                 $inventoryRole->permissions()->syncWithoutDetaching([$createdPerm->id]);
             }
 
-            if (in_array($perm['slug'], ['reports.view_pnl', 'purchases.manage'])) {
+            if (in_array($perm['slug'], ['reports.view_pnl', 'purchases.manage', 'suppliers.manage'])) {
                 $accountantRole->permissions()->syncWithoutDetaching([$createdPerm->id]);
             }
         }
@@ -468,5 +471,155 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
             ]
         );
+
+        // ==========================================
+        // 12. Phase 3: Customers Master Seed
+        // ==========================================
+        $customers = [
+            [
+                'customer_code' => 'CUST-00001',
+                'name' => 'Walk-in Retail Customer',
+                'phone' => '+91 99999 00000',
+                'alternate_phone' => null,
+                'email' => 'walkin@store.local',
+                'address' => 'Counter Cash Sales',
+                'city' => 'Central City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600001',
+                'tax_number' => null,
+                'notes' => 'Default walk-in counter customer record',
+                'is_active' => true,
+            ],
+            [
+                'customer_code' => 'CUST-00002',
+                'name' => 'John Doe',
+                'phone' => '+91 98111 22334',
+                'alternate_phone' => '+91 98111 99887',
+                'email' => 'john.doe@example.com',
+                'address' => '42, Sunset Boulevard, Flat 3B',
+                'city' => 'Central Market',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600002',
+                'tax_number' => null,
+                'notes' => 'Regular grocery customer, prefers evening deliveries',
+                'is_active' => true,
+            ],
+            [
+                'customer_code' => 'CUST-00003',
+                'name' => 'Sarah Jenkins',
+                'phone' => '+91 98222 33445',
+                'alternate_phone' => null,
+                'email' => 'sarah.jenkins@example.com',
+                'address' => '15, North Lake Avenue',
+                'city' => 'North City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600018',
+                'tax_number' => null,
+                'notes' => 'Organic section regular buyer',
+                'is_active' => true,
+            ],
+            [
+                'customer_code' => 'CUST-00004',
+                'name' => 'TechCorp Solutions Pvt Ltd',
+                'phone' => '+91 98777 66554',
+                'alternate_phone' => '+91 44 2828 1234',
+                'email' => 'procurement@techcorp.com',
+                'address' => 'Tech Park Tower 4, Sector 7',
+                'city' => 'Central City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600113',
+                'tax_number' => 'GSTIN33AABCT9988K1Z3',
+                'notes' => 'Corporate account for pantry and office supplies',
+                'is_active' => true,
+            ],
+            [
+                'customer_code' => 'CUST-00005',
+                'name' => 'Anita Sharma',
+                'phone' => '+91 98444 55667',
+                'alternate_phone' => null,
+                'email' => 'anita.sharma@example.com',
+                'address' => '88, Garden Road, Phase 2',
+                'city' => 'North City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600040',
+                'tax_number' => null,
+                'notes' => 'Inactive customer profile for testing filters',
+                'is_active' => false,
+            ],
+        ];
+
+        foreach ($customers as $c) {
+            Customer::updateOrCreate(['customer_code' => $c['customer_code']], $c);
+        }
+
+        // ==========================================
+        // 13. Phase 3: Suppliers Master Seed
+        // ==========================================
+        $suppliers = [
+            [
+                'supplier_code' => 'SUP-00001',
+                'name' => 'Fresh Farm Agro Wholesale',
+                'contact_person' => 'Ramesh Patel',
+                'phone' => '+91 98100 11223',
+                'alternate_phone' => '+91 98100 99881',
+                'email' => 'orders@freshfarmagro.com',
+                'address' => 'Plot 45, Agro Market Yard',
+                'city' => 'Central Market',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600079',
+                'tax_number' => 'GSTIN33AABCF4567M1Z1',
+                'notes' => 'Primary vendor for fresh fruits and organic vegetables',
+                'is_active' => true,
+            ],
+            [
+                'supplier_code' => 'SUP-00002',
+                'name' => 'Supreme Dairy & Poultry Co.',
+                'contact_person' => 'Suresh Kumar',
+                'phone' => '+91 98200 22334',
+                'alternate_phone' => null,
+                'email' => 'distribution@supremedairy.com',
+                'address' => 'Dairy Complex Road, Kanchipuram Highway',
+                'city' => 'Central City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600095',
+                'tax_number' => 'GSTIN33AABCS8901N1Z2',
+                'notes' => 'Daily supplier for milk, cheese, and farm eggs',
+                'is_active' => true,
+            ],
+            [
+                'supplier_code' => 'SUP-00003',
+                'name' => 'Golden Harvest Bakery Supply',
+                'contact_person' => 'Vikram Joshi',
+                'phone' => '+91 98300 33445',
+                'alternate_phone' => '+91 44 2490 8877',
+                'email' => 'sales@goldenharvest.com',
+                'address' => 'SIDCO Industrial Estate, Ambattur',
+                'city' => 'North City',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600058',
+                'tax_number' => 'GSTIN33AABCG2345P1Z4',
+                'notes' => 'Packaged bakery goods, bread, and baking ingredients',
+                'is_active' => true,
+            ],
+            [
+                'supplier_code' => 'SUP-00004',
+                'name' => 'Everest Beverages & Snacks Ltd.',
+                'contact_person' => 'Deepak Verma',
+                'phone' => '+91 98500 55667',
+                'alternate_phone' => null,
+                'email' => 'deepak@everestbev.com',
+                'address' => '78, Ring Road Logistics Hub',
+                'city' => 'Metro Center',
+                'state' => 'Tamil Nadu',
+                'postal_code' => '600099',
+                'tax_number' => 'GSTIN33AABCE1234R1Z8',
+                'notes' => 'Former cold beverage vendor (Deactivated)',
+                'is_active' => false,
+            ],
+        ];
+
+        foreach ($suppliers as $s) {
+            Supplier::updateOrCreate(['supplier_code' => $s['supplier_code']], $s);
+        }
     }
 }

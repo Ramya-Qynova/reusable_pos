@@ -84,7 +84,7 @@ export const TopNavbar: React.FC = () => {
                     key={item.id}
                     to={item.path}
                     className={cn(
-                      'flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-lg text-[13px] xl:text-[13.5px] font-medium leading-normal whitespace-nowrap transition-all duration-150',
+                      'flex items-center gap-1.5 px-2 xl:px-2.5 2xl:px-3 py-1.5 rounded-lg text-[12px] xl:text-[13px] 2xl:text-[13.5px] font-medium leading-normal whitespace-nowrap transition-all duration-150',
                       isActive
                         ? 'bg-white/25 text-white font-semibold shadow-xs ring-1 ring-white/30'
                         : 'text-white/85 hover:text-white hover:bg-white/10'

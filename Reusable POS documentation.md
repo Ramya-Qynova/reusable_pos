@@ -183,20 +183,19 @@ The application is divided into the following major modules:
 8. Unit Management
 9. Product Variants and Pricing
 10. Customer Management
-11. Loyalty Management
-12. Supplier Management
-13. Purchase Management
-14. Goods Receipt Management
-15. Inventory and Stock Management
-16. POS Billing and Sales
-17. Payment Management
-18. Cash Drawer Management
-19. Sales Returns and Refunds
-20. Customer Credit Management
-21. Supplier Payments
-22. Expense Management
-23. Reports and Analytics
-24. PWA and Offline Synchronization
+11. Supplier Management
+12. Purchase Management
+13. Goods Receipt Management
+14. Inventory and Stock Management
+15. POS Billing and Sales
+16. Payment Management
+17. Cash Drawer Management
+18. Sales Returns and Refunds
+19. Customer Credit Management
+20. Supplier Payments
+21. Expense Management
+22. Reports and Analytics
+23. PWA and Offline Synchronization
 
 ---
 
@@ -438,7 +437,7 @@ A branch can have a separate selling price override. If no override exists, the 
 
 ## 5.10 Customer Management Module
 
-**Purpose:** Maintain customer information for sales, billing, returns and future loyalty or credit operations.
+**Purpose:** Maintain customer information for sales, billing, returns and future credit operations.
 
 Expected features:
 
@@ -460,26 +459,7 @@ Customers should be selectable during POS billing.
 
 **Development status:** Planned for Phase 3.
 
-## 5.11 Loyalty Management Module
-
-**Purpose:** Support customer loyalty programmes.
-
-Expected features:
-
-- Loyalty membership.
-- Customer enrolment.
-- Points earning rules.
-- Points redemption.
-- Loyalty transaction history.
-- Points adjustments.
-- Points expiry.
-- Loyalty programme configuration.
-
-Points should be recorded through traceable transactions.
-
-**Development status:** Planned for Phase 3. Detailed loyalty rules are to be finalized before implementation.
-
-## 5.12 Supplier Management Module
+## 5.11 Supplier Management Module
 
 **Purpose:** Maintain supplier information for purchasing and accounts operations.
 
@@ -503,7 +483,7 @@ Suppliers should be selectable during purchase order creation.
 
 **Development status:** Planned for Phase 3.
 
-## 5.13 Purchase Management Module
+## 5.12 Purchase Management Module
 
 **Purpose:** Manage products purchased from suppliers.
 
@@ -526,7 +506,7 @@ Creating a purchase order should not automatically increase stock unless the app
 
 **Development status:** Planned for Phase 4.
 
-## 5.14 Goods Receipt Management Module
+## 5.13 Goods Receipt Management Module
 
 **Purpose:** Record the actual goods received against purchase orders.
 
@@ -547,7 +527,7 @@ Stock should be updated through the approved goods-receipt workflow.
 
 **Development status:** Planned for Phase 4.
 
-## 5.15 Inventory and Stock Management Module
+## 5.14 Inventory and Stock Management Module
 
 **Purpose:** Maintain accurate stock quantities and stock movement history.
 
@@ -575,7 +555,7 @@ Stock balances should be reconcilable with the movement history.
 
 **Development status:** Planned for Phase 5.
 
-## 5.16 POS Billing and Sales Module
+## 5.15 POS Billing and Sales Module
 
 **Purpose:** Support counter sales and sales order processing.
 
@@ -604,7 +584,7 @@ The system must prevent duplicate sales caused by repeated submissions.
 
 **Development status:** Planned for Phase 6.
 
-## 5.17 Payment Management Module
+## 5.16 Payment Management Module
 
 **Purpose:** Record payments received and payments made.
 
@@ -624,7 +604,7 @@ Every payment should be linked to the appropriate business transaction.
 
 **Development status:** Planned for Phase 6 and Phase 7.
 
-## 5.18 Cash Drawer Management Module
+## 5.17 Cash Drawer Management Module
 
 **Purpose:** Track cash handling during POS operations.
 
@@ -645,7 +625,7 @@ Cash drawer operations should be associated with the relevant branch and user.
 
 **Development status:** Planned for Phase 6.
 
-## 5.19 Sales Returns and Refunds Module
+## 5.18 Sales Returns and Refunds Module
 
 **Purpose:** Manage returned products and customer refunds.
 
@@ -670,7 +650,7 @@ Refund transactions should be stored separately and remain traceable.
 
 **Development status:** Planned for Phase 7.
 
-## 5.20 Customer Credit Management Module
+## 5.19 Customer Credit Management Module
 
 **Purpose:** Manage customer outstanding balances and credit transactions.
 
@@ -689,7 +669,7 @@ Customer balances should be backed by transaction records rather than being main
 
 **Development status:** Planned for Phase 7.
 
-## 5.21 Supplier Payments Module
+## 5.20 Supplier Payments Module
 
 **Purpose:** Track supplier outstanding balances and payments.
 
@@ -708,7 +688,7 @@ Supplier balances should be supported by traceable financial records.
 
 **Development status:** Planned for Phase 7.
 
-## 5.22 Expense Management Module
+## 5.21 Expense Management Module
 
 **Purpose:** Record day-to-day business expenses.
 
@@ -727,7 +707,7 @@ Expected features:
 
 **Development status:** Planned for Phase 7.
 
-## 5.23 Reports and Analytics Module
+## 5.22 Reports and Analytics Module
 
 **Purpose:** Provide business insights and operational reports.
 
@@ -754,7 +734,7 @@ Reports should use actual database records and support relevant date, branch and
 
 **Development status:** Planned for Phase 8.
 
-## 5.24 PWA and Offline Synchronization Module
+## 5.23 PWA and Offline Synchronization Module
 
 **Purpose:** Allow supported application workflows to continue when the internet connection is unavailable.
 
@@ -815,7 +795,6 @@ The system should not silently overwrite conflicting sales or stock transactions
 Future phases will introduce database tables for:
 
 - Customers and customer groups.
-- Loyalty transactions.
 - Suppliers.
 - Purchase orders.
 - Goods receipt notes.
@@ -946,7 +925,7 @@ The project is divided into nine development phases.
 |---|---|---|
 | Phase 1 | Foundation, authentication, roles, permissions, business profile and branches | Completed and tested as reported |
 | Phase 2 | Products, categories, units, pricing and variants | Implemented; backend tests passed |
-| Phase 3 | Customers, loyalty and suppliers master | Planned |
+| Phase 3 | Customers and suppliers master | Completed and verified; all automated tests and frontend build passed |
 | Phase 4 | Purchase orders and goods receipt | Planned |
 | Phase 5 | Inventory, stock ledger, adjustments and branch transfers | Planned |
 | Phase 6 | POS billing, sales orders, invoices, payments and cash shifts | Planned |
@@ -1006,6 +985,27 @@ The Phase 2 implementation report stated:
 The tests include category hierarchy validation, unit CRUD, product search, duplicate SKU/barcode prevention, variant uniqueness, tax consistency, decimal precision, branch pricing authorization, catalogue permissions, barcode lookup and product soft deletion.
 
 An earlier Phase 2 report also showed a successful frontend production build. Final frontend build and manual browser verification should be confirmed separately.
+
+## Phase 3 – Customers Master & Suppliers Master
+
+The Phase 3 implementation report covers:
+
+- Independent installation architecture preserved with no `tenant_id` or multi-tenant scaffolding.
+- Shared customer and supplier master records across all branches within the client installation.
+- Complete Customers Master module (CRUD, unique code generator, safe soft-deletion, active/inactive toggle, multi-field search, pagination and filtering).
+- Complete Suppliers Master module (CRUD, contact person, unique code generator, safe soft-deletion, active/inactive toggle, multi-field search, pagination and filtering).
+- Unsafe deletion protection preventing removal of records referenced by transactions (with domain error codes `CUSTOMER_HAS_REFERENCES` and `SUPPLIER_HAS_REFERENCES`).
+- Full audit logging for create, update, delete, and status change events via `AuditLog`.
+- Backend permission enforcement (`customers.manage`, `suppliers.manage`) guarding mutating operations while allowing lookup.
+- Complete frontend React pages (`CustomersPage.tsx`, `SuppliersPage.tsx`) matching the established application design, with TopNavbar navigation items and prominent dashboard integration.
+- Strictly excluded features (loyalty points, rewards, purchase orders, sales billing, customer credit, supplier payments, multi-tenant schemas) kept out of scope.
+
+**Reported verification from backend test output:**
+
+- 46 total backend tests passed (268 assertions).
+- 20 new tests dedicated to Phase 3 customer and supplier CRUD, validation, search, pagination, status toggling, deletion restrictions, and permission boundaries.
+- 0 failures.
+- Frontend production build (`npm run build`) succeeded cleanly with 0 errors.
 
 ---
 
@@ -1137,7 +1137,6 @@ The following capabilities may be considered as the product develops:
 - Serial number tracking.
 - Advanced product variants.
 - Branch-level promotions.
-- Customer loyalty programmes.
 - Advanced tax reporting.
 - Payment gateway integration.
 - Accounting integrations.

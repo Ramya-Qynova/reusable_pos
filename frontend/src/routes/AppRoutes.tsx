@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { MainLayout } from '../components/layout/MainLayout'
 import DashboardPage from '../pages/DashboardPage'
 import ProductsPage from '../pages/ProductsPage'
+import CustomersPage from '../pages/CustomersPage'
+import SuppliersPage from '../pages/SuppliersPage'
 import ModulePlaceholder from '../pages/ModulePlaceholder'
 
 export const AppRoutes: React.FC = () => {
@@ -23,16 +25,16 @@ export const AppRoutes: React.FC = () => {
           path="/inventory"
           element={<ModulePlaceholder moduleId="inventory" title="Inventory" subtitle="Stock tracking, stock adjustment, transfer, and low stock." />}
         />
-        <Route
-          path="/customers"
-          element={<ModulePlaceholder moduleId="customers" title="Customers" subtitle="Customer directory, loyalty points, and credit accounts." />}
-        />
+        {/* Phase 3: Fully Developed Customers Master */}
+        <Route path="/customers" element={<CustomersPage />} />
+
+        {/* Phase 3: Fully Developed Suppliers Master */}
+        <Route path="/suppliers" element={<SuppliersPage />} />
+
         <Route
           path="/purchases"
           element={<ModulePlaceholder moduleId="purchases" title="Purchases" subtitle="Vendor management, purchase orders, and goods receipt (GRN)." />}
         />
-        {/* Backward compatibility alias for /suppliers */}
-        <Route path="/suppliers" element={<Navigate to="/purchases" replace />} />
 
         <Route
           path="/finance"

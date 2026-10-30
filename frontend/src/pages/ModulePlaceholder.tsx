@@ -35,7 +35,6 @@ const MODULE_SUBMODULES: Record<string, SubmoduleDef[]> = {
   ],
   customers: [
     { id: 'directory', label: 'Customer Directory' },
-    { id: 'loyalty', label: 'Loyalty Points' },
     { id: 'credit', label: 'Credit Accounts' },
     { id: 'groups', label: 'Customer Groups' },
   ],

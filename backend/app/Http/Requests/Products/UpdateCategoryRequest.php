@@ -13,6 +13,15 @@ class UpdateCategoryRequest extends FormRequest
         return true;
     }
 
+    protected function prepareForValidation(): void
+    {
+        if (empty($this->slug) && !empty($this->name)) {
+            $this->merge([
+                'slug' => \Illuminate\Support\Str::slug($this->name),
+            ]);
+        }
+    }
+
     public function rules(): array
     {
         $categoryId = $this->route('category')?->id ?? $this->route('category');
