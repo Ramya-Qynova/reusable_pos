@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #D45060;
+  --color-primary-hover: #BD3E4E;
+  --color-primary-active: #A83342;
+  --color-primary-light: #FDF2F4;
+  --color-primary-subtle: #FCE7EA;
+  --color-primary-border: #F7B5BD;
+  
+  --color-main-bg: #F5F7FB;
+  --color-card-bg: #FFFFFF;
+  --color-text-main: #1E293B;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+  --color-border-subtle: #E2E8F0;
+  --color-border-card: #EAEFF5;
+
+  --color-success: #10B981;
+  --color-success-light: #ECFDF5;
+  --color-success-text: #065F46;
+
+  --color-warning: #F59E0B;
+  --color-warning-light: #FFFBEB;
+  --color-warning-text: #92400E;
+
+  --color-danger: #EF4444;
+  --color-danger-light: #FEF2F2;
+  --color-danger-text: #991B1B;
+
+  --color-info: #3B82F6;
+  --color-info-light: #EFF6FF;
+  --color-info-text: #1E40AF;
+
+  --color-purple: #8B5CF6;
+  --color-purple-light: #F5F3FF;
+  --color-purple-text: #5B21B6;
+
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+:root {
+  --brand-primary: #D45060;
+  --brand-primary-hover: #BD3E4E;
+  --brand-primary-light: #FDF2F4;
+  --app-bg: #F5F7FB;
+  --card-bg: #FFFFFF;
+  --text-main: #1E293B;
+  --text-secondary: #64748B;
+  --border-subtle: #E2E8F0;
+}
+
+html, body {
+  margin: 0;
+  background-color: var(--app-bg);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+/* Custom scrollbars for clean commercial desktop feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}

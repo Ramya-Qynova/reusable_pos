@@ -1,0 +1,13 @@
+{
+  "name": "reusable-pos-project",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Reusable Commercial POS Product Monorepo",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build:frontend": "npm --prefix frontend run build"
+  }
+}
+
