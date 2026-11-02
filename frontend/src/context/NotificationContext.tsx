@@ -19,14 +19,7 @@ interface NotificationContextType {
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined)
 
 export const NotificationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [notifications, setNotifications] = useState<AppNotification[]>([
-    {
-      id: 'welcome-init',
-      title: 'POS Ready',
-      message: 'Green Mart Supermarket profile loaded. Catalog & Dashboard active.',
-      type: 'info',
-    },
-  ])
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
 
   const dismissNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((item) => item.id !== id))
