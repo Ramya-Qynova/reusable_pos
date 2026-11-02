@@ -204,11 +204,9 @@ export const ProductsPage: React.FC = () => {
   }, [searchQuery, selectedCategoryFilter, selectedBrandFilter, selectedStatusFilter])
 
   useEffect(() => {
-    if (isAuthenticated) {
-      loadMasterData()
-      loadProducts()
-    }
-  }, [isAuthenticated, loadMasterData, loadProducts])
+    loadMasterData()
+    loadProducts()
+  }, [loadMasterData, loadProducts])
 
   // Handle Tax Slab Change in Product Form -> Auto sync tax rate
   const handleTaxSlabChange = (slabId: string) => {
@@ -325,23 +323,52 @@ export const ProductsPage: React.FC = () => {
   // Save Product (Create or Update)
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!productForm.name.trim()) {
+      showNotification({ title: 'Validation Error', message: 'Please enter a product name.', type: 'warning' })
+      return
+    }
+    if (!productForm.sku.trim()) {
+      showNotification({ title: 'Validation Error', message: 'Please enter a product SKU.', type: 'warning' })
+      return
+    }
+    const catId = parseInt(productForm.category_id)
+    if (isNaN(catId)) {
+      showNotification({ title: 'Validation Error', message: 'Please select a valid category from the dropdown.', type: 'warning' })
+      return
+    }
+    const unitId = parseInt(productForm.unit_id)
+    if (isNaN(unitId)) {
+      showNotification({ title: 'Validation Error', message: 'Please select a valid unit of measure.', type: 'warning' })
+      return
+    }
+    const costPrice = parseFloat(productForm.cost_price)
+    if (isNaN(costPrice) || costPrice < 0) {
+      showNotification({ title: 'Validation Error', message: 'Please enter a valid cost price (e.g. 50.00).', type: 'warning' })
+      return
+    }
+    const sellingPrice = parseFloat(productForm.selling_price)
+    if (isNaN(sellingPrice) || sellingPrice < 0) {
+      showNotification({ title: 'Validation Error', message: 'Please enter a valid selling price (e.g. 75.00).', type: 'warning' })
+      return
+    }
+
     try {
       const payload: Record<string, unknown> = {
-        name: productForm.name,
-        sku: productForm.sku,
-        barcode: productForm.barcode || null,
-        hsn_code: productForm.hsn_code || null,
-        category_id: parseInt(productForm.category_id),
+        name: productForm.name.trim(),
+        sku: productForm.sku.trim(),
+        barcode: productForm.barcode?.trim() || null,
+        hsn_code: productForm.hsn_code?.trim() || null,
+        category_id: catId,
         brand_id: productForm.brand_id ? parseInt(productForm.brand_id) : null,
-        unit_id: parseInt(productForm.unit_id),
+        unit_id: unitId,
         tax_slab_id: productForm.tax_slab_id ? parseInt(productForm.tax_slab_id) : null,
         tax_rate: productForm.tax_rate ? parseFloat(productForm.tax_rate) : 0,
-        cost_price: parseFloat(productForm.cost_price),
-        selling_price: parseFloat(productForm.selling_price),
+        cost_price: costPrice,
+        selling_price: sellingPrice,
         mrp: productForm.mrp ? parseFloat(productForm.mrp) : null,
-        minimum_stock: parseFloat(productForm.minimum_stock),
-        description: productForm.description || null,
-        image_url: productForm.image_url || null,
+        minimum_stock: productForm.minimum_stock ? parseFloat(productForm.minimum_stock) : 0,
+        description: productForm.description?.trim() || null,
+        image_url: productForm.image_url?.trim() || null,
         has_variants: productForm.has_variants,
       }
 

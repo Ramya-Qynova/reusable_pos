@@ -5,9 +5,9 @@
   "description": "Reusable Commercial POS Product Monorepo",
   "scripts": {
     "dev": "npm --prefix frontend run dev",
-    "build": "npm --prefix frontend run build",
+    "dev:backend": "cd backend && php artisan serve --host=127.0.0.1 --port=8000",
     "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
     "build:frontend": "npm --prefix frontend run build"
   }
 }
-

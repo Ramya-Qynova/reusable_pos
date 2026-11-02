@@ -78,6 +78,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     } catch (err) {
       console.warn('Auto auth session init deferred until backend is reachable:', err)
+      // Retry in 2 seconds if backend was offline
+      setTimeout(() => {
+        if (!localStorage.getItem('pos_auth_token')) {
+          autoInitSession()
+        }
+      }, 2000)
     } finally {
       setIsLoading(false)
     }
