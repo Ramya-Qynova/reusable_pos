@@ -13,3 +13,4 @@ echo   Both Servers Running!
 echo   Frontend URL: http://localhost:5173
 echo   Backend API:  http://127.0.0.1:8000
 echo ========================================================
+
