@@ -19,14 +19,13 @@ return new class extends Migration
             $table->timestamps();
 
             $table->index('group');
-            $table->index('key');
         });
 
         // 2. Offline Synchronization Log / Idempotency Table
         Schema::create('sync_transactions', function (Blueprint $table) {
             $table->id();
             $table->string('idempotency_key', 100)->unique();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
             $table->foreignId('user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->string('operation_type', 50); // offline_sale, stock_adjustment, customer_create
             $table->string('entity_type', 50);
@@ -38,7 +37,6 @@ return new class extends Migration
             $table->timestamp('synced_at')->useCurrent();
             $table->timestamps();
 
-            $table->index('idempotency_key');
             $table->index(['branch_id', 'status']);
         });
     }

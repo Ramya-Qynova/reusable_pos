@@ -52,7 +52,22 @@ class SalesOrderItem extends Model
         ];
     }
 
+    public function getVariantIdAttribute(): ?int
+    {
+        return $this->product_variant_id ? (int) $this->product_variant_id : null;
+    }
+
+    public function setVariantIdAttribute($value): void
+    {
+        $this->attributes['product_variant_id'] = $value;
+    }
+
     public function order(): BelongsTo
+    {
+        return $this->belongsTo(SalesOrder::class, 'sales_order_id');
+    }
+
+    public function salesOrder(): BelongsTo
     {
         return $this->belongsTo(SalesOrder::class, 'sales_order_id');
     }

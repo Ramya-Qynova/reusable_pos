@@ -43,8 +43,17 @@ class CheckPermission
             );
         }
 
-        // 2. Ensure user possesses the required permission (in the target branch or globally)
-        if (!$user->hasPermission($permissionSlug, $branchId ? (int) $branchId : null)) {
+        // 2. Ensure user possesses at least one of the required permissions (in the target branch or globally)
+        $slugs = array_map('trim', explode(',', $permissionSlug));
+        $hasPermission = false;
+        foreach ($slugs as $slug) {
+            if ($user->hasPermission($slug, $branchId ? (int) $branchId : null)) {
+                $hasPermission = true;
+                break;
+            }
+        }
+
+        if (!$hasPermission) {
             return $this->errorResponse(
                 "You do not possess the required permission [{$permissionSlug}] to perform this action.",
                 Response::HTTP_FORBIDDEN,

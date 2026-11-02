@@ -234,6 +234,21 @@ class CustomerController extends Controller
     }
 
     /**
+     * Customer Ledger Statement
+     */
+    public function ledger(Customer $customer, Request $request): JsonResponse
+    {
+        $filters = $request->only(['from_date', 'to_date', 'branch_id']);
+        if (!$request->has('branch_id') && app()->bound('active_branch')) {
+            $filters['branch_id'] = app('active_branch')->id;
+        }
+
+        $statement = $this->customerService->getCustomerLedgerStatement($customer, $filters);
+
+        return $this->successResponse($statement, 'Customer ledger statement retrieved.');
+    }
+
+    /**
      * Customer bulk import
      */
     public function bulkImport(Request $request): JsonResponse

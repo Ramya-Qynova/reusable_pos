@@ -4,11 +4,14 @@ namespace Tests\Feature;
 
 use App\Models\AuditLog;
 use App\Models\Branch;
+use App\Models\BranchProductPrice;
 use App\Models\CashRegisterShift;
 use App\Models\Customer;
+use App\Models\CustomerGroup;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\SalesOrder;
+use App\Models\SalesPayment;
 use App\Models\Unit;
 use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
@@ -39,6 +42,39 @@ class Phase6SalesAndBillingTest extends TestCase
 
         $this->mainBranch = Branch::where('branch_code', 'MAIN')->first();
         $this->northBranch = Branch::where('branch_code', 'NORTH')->first();
+
+        // Seed initial branch stock for test products so legitimate sales have available inventory
+        if (Schema::hasTable('branch_stocks')) {
+            foreach (Product::all() as $prod) {
+                if ($prod->has_variants) {
+                    foreach ($prod->variants as $variant) {
+                        $this->seedStock($prod, 100.000, $variant->id);
+                    }
+                } else {
+                    $this->seedStock($prod, 100.000);
+                }
+            }
+        }
+    }
+
+    protected function seedStock(Product $product, float $qty = 100.0, ?int $variantId = null, ?int $branchId = null): void
+    {
+        if (Schema::hasTable('branch_stocks')) {
+            DB::table('branch_stocks')->updateOrInsert(
+                [
+                    'branch_id' => $branchId ?? $this->mainBranch->id,
+                    'product_id' => $product->id,
+                    'variant_id' => $variantId,
+                ],
+                [
+                    'quantity' => $qty,
+                    'damaged_quantity' => 0.000,
+                    'reserved_quantity' => 0.000,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]
+            );
+        }
     }
 
     /*
@@ -247,6 +283,9 @@ class Phase6SalesAndBillingTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->seedStock($prodExcl, 50.0);
+        $this->seedStock($prodIncl, 50.0);
+
         $saleData = [
             'is_gst_bill' => true,
             'items' => [
@@ -341,6 +380,9 @@ class Phase6SalesAndBillingTest extends TestCase
             'is_active' => true,
         ]);
 
+        $this->seedStock($pieceProduct, 50.0);
+        $this->seedStock($kgProduct, 50.0);
+
         // Decimals on whole-number unit -> 422
         $invalidResp = $this->actingAs($this->cashier, 'sanctum')
             ->withHeader('X-Branch-ID', $this->mainBranch->id)
@@ -376,6 +418,8 @@ class Phase6SalesAndBillingTest extends TestCase
             'selling_price' => 250.00,
             'is_active' => true,
         ]);
+
+        $this->seedStock($product, 50.0, $variant->id);
 
         $response = $this->actingAs($this->cashier, 'sanctum')
             ->withHeader('X-Branch-ID', $this->mainBranch->id)
@@ -502,27 +546,26 @@ class Phase6SalesAndBillingTest extends TestCase
 
     public function test_stock_service_integration_and_transaction_safety(): void
     {
-        // Simulate Phase 5 branch_stocks table to verify stock availability check and deduction
-        Schema::create('branch_stocks', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('branch_id');
-            $table->foreignId('product_id');
-            $table->foreignId('variant_id')->nullable();
-            $table->decimal('quantity', 12, 3)->default(0);
-            $table->timestamps();
-        });
+        $tableCreated = false;
+        if (!Schema::hasTable('branch_stocks')) {
+            Schema::create('branch_stocks', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('branch_id');
+                $table->foreignId('product_id');
+                $table->foreignId('variant_id')->nullable();
+                $table->decimal('quantity', 12, 3)->default(0);
+                $table->timestamps();
+            });
+            $tableCreated = true;
+        }
 
-        $product = Product::first();
+        $product = Product::where('has_variants', false)->first();
 
         // Branch has 5 units available in stock
-        DB::table('branch_stocks')->insert([
-            'branch_id' => $this->mainBranch->id,
-            'product_id' => $product->id,
-            'variant_id' => null,
-            'quantity' => 5.000,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        DB::table('branch_stocks')->updateOrInsert(
+            ['branch_id' => $this->mainBranch->id, 'product_id' => $product->id, 'variant_id' => null],
+            ['quantity' => 5.000, 'updated_at' => now()]
+        );
 
         // 1. Trying to buy 10 units (when only 5 in stock) -> Fails 422 Insufficient Stock
         $failResp = $this->actingAs($this->cashier, 'sanctum')
@@ -536,7 +579,7 @@ class Phase6SalesAndBillingTest extends TestCase
             ->assertJsonValidationErrors(['items']);
 
         // Stock remains unchanged at 5
-        $qty = DB::table('branch_stocks')->where('product_id', $product->id)->value('quantity');
+        $qty = DB::table('branch_stocks')->where('branch_id', $this->mainBranch->id)->where('product_id', $product->id)->whereNull('variant_id')->value('quantity');
         $this->assertEquals(5.000, (float) $qty);
 
         // 2. Buy 2 units -> Succeeds, stock decremented to 3
@@ -548,11 +591,13 @@ class Phase6SalesAndBillingTest extends TestCase
             ]);
 
         $succResp->assertStatus(201);
-        $newQty = DB::table('branch_stocks')->where('product_id', $product->id)->value('quantity');
+        $newQty = DB::table('branch_stocks')->where('branch_id', $this->mainBranch->id)->where('product_id', $product->id)->whereNull('variant_id')->value('quantity');
         $this->assertEquals(3.000, (float) $newQty);
 
-        // Clean up simulated table
-        Schema::dropIfExists('branch_stocks');
+        // Clean up simulated table only if created in this test
+        if ($tableCreated) {
+            Schema::dropIfExists('branch_stocks');
+        }
     }
 
     public function test_branch_authorization_guards_pos_billing(): void
@@ -574,5 +619,223 @@ class Phase6SalesAndBillingTest extends TestCase
                 'success' => false,
                 'error_code' => 'BRANCH_ACCESS_DENIED',
             ]);
+    }
+
+    public function test_branch_specific_pricing_and_promotional_override(): void
+    {
+        $product = Product::first();
+        BranchProductPrice::updateOrCreate(
+            [
+                'branch_id' => $this->mainBranch->id,
+                'product_id' => $product->id,
+                'variant_id' => null,
+            ],
+            [
+                'selling_price' => 45.00,
+                'special_price' => 42.00,
+                'is_active' => true,
+            ]
+        );
+
+        $this->seedStock($product, 50.0);
+
+        $response = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/sales', [
+                'is_gst_bill' => false,
+                'items' => [['product_id' => $product->id, 'quantity' => 2]],
+                'payments' => [['payment_method' => 'cash', 'amount' => 84.00]],
+            ]);
+
+        $response->assertStatus(201);
+        $item = $response->json('data.items.0');
+        $this->assertEquals(42.00, (float) $item['unit_price']);
+        $this->assertEquals(84.00, (float) $response->json('data.grand_total'));
+    }
+
+    public function test_customer_group_discount_auto_applied_without_manual_discount_permission(): void
+    {
+        $group = CustomerGroup::create([
+            'name' => 'Gold Members',
+            'code' => 'GOLD',
+            'discount_percentage' => 10.00,
+            'is_active' => true,
+        ]);
+
+        $vipCustomer = Customer::create([
+            'customer_code' => 'CUST-GOLD-001',
+            'customer_group_id' => $group->id,
+            'name' => 'Alice Gold',
+            'phone' => '9888877777',
+            'is_active' => true,
+        ]);
+
+        $product = Product::create([
+            'category_id' => 1,
+            'unit_id' => Unit::first()->id,
+            'name' => 'Member Test Item',
+            'sku' => 'MEM-TEST-001',
+            'cost_price' => 50.00,
+            'selling_price' => 100.00,
+            'tax_rate' => 0.00,
+            'is_tax_inclusive' => true,
+            'is_active' => true,
+        ]);
+
+        $this->seedStock($product, 20.0);
+
+        // Cashier has NO pos.discount permission, but selects Gold customer
+        $response = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/sales', [
+                'customer_id' => $vipCustomer->id,
+                'is_gst_bill' => false,
+                'items' => [['product_id' => $product->id, 'quantity' => 1]],
+                'payments' => [['payment_method' => 'cash', 'amount' => 90.00]],
+            ]);
+
+        $response->assertStatus(201);
+        // 100 - 10% = 90.00
+        $this->assertEquals(10.00, (float) $response->json('data.discount_amount'));
+        $this->assertEquals(90.00, (float) $response->json('data.grand_total'));
+    }
+
+    public function test_idempotent_checkout_prevents_duplicate_sales_and_stock_deductions(): void
+    {
+        $product = Product::where('has_variants', false)->first();
+        $this->seedStock($product, 50.0);
+
+        $payload = [
+            'idempotency_key' => 'IDEMP-TEST-998877',
+            'is_gst_bill' => false,
+            'items' => [['product_id' => $product->id, 'quantity' => 5]],
+            'payments' => [['payment_method' => 'cash', 'amount' => 1000]],
+        ];
+
+        // First call
+        $firstResp = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/sales', $payload);
+
+        $firstResp->assertStatus(201);
+        $orderId = $firstResp->json('data.id');
+
+        // Stock should be 45
+        $stockAfterFirst = DB::table('branch_stocks')
+            ->where('branch_id', $this->mainBranch->id)
+            ->where('product_id', $product->id)
+            ->whereNull('variant_id')
+            ->value('quantity');
+        $this->assertEquals(45.0, (float) $stockAfterFirst);
+
+        // Second duplicate call with same idempotency key
+        $secondResp = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/sales', $payload);
+
+        $secondResp->assertSuccessful();
+        $this->assertEquals($orderId, $secondResp->json('data.id'));
+
+        // Stock MUST remain 45, NOT decremented twice!
+        $stockAfterSecond = DB::table('branch_stocks')
+            ->where('branch_id', $this->mainBranch->id)
+            ->where('product_id', $product->id)
+            ->whereNull('variant_id')
+            ->value('quantity');
+        $this->assertEquals(45.0, (float) $stockAfterSecond);
+    }
+
+    public function test_sales_cancellation_and_inventory_reversal(): void
+    {
+        // 1. Open shift
+        $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/cash-register/open', ['opening_balance' => 500.00]);
+
+        $product = Product::where('has_variants', false)->first();
+        $this->seedStock($product, 50.0);
+
+        // 2. Complete a sale of 4 units
+        $saleResp = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson('/api/v1/sales', [
+                'is_gst_bill' => false,
+                'items' => [['product_id' => $product->id, 'quantity' => 4]],
+                'payments' => [['payment_method' => 'cash', 'amount' => 1000.00]],
+            ]);
+
+        $saleResp->assertStatus(201);
+        $saleId = $saleResp->json('data.id');
+
+        // Stock decremented to 46
+        $stockAfterSale = DB::table('branch_stocks')
+            ->where('branch_id', $this->mainBranch->id)
+            ->where('product_id', $product->id)
+            ->whereNull('variant_id')
+            ->value('quantity');
+        $this->assertEquals(46.0, (float) $stockAfterSale);
+
+        // 3. Cashier (NO pos.returns permission) attempts to cancel -> 403 Forbidden
+        $unauthCancel = $this->actingAs($this->cashier, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson("/api/v1/sales/{$saleId}/cancel", [
+                'reason' => 'Customer changed mind',
+            ]);
+        $unauthCancel->assertStatus(403);
+
+        // 4. Branch Manager (HAS pos.returns permission) cancels sale -> 200 Success
+        $authCancel = $this->actingAs($this->manager, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson("/api/v1/sales/{$saleId}/cancel", [
+                'reason' => 'Customer returned defective goods',
+            ]);
+
+        $authCancel->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'id' => $saleId,
+                    'status' => 'cancelled',
+                ],
+            ]);
+
+        // 5. Stock restored back to 50
+        $stockAfterCancel = DB::table('branch_stocks')
+            ->where('branch_id', $this->mainBranch->id)
+            ->where('product_id', $product->id)
+            ->whereNull('variant_id')
+            ->value('quantity');
+        $this->assertEquals(50.0, (float) $stockAfterCancel);
+
+        // 6. Stock movement logged with type = return and positive quantity
+        if (Schema::hasTable('stock_movements')) {
+            $this->assertDatabaseHas('stock_movements', [
+                'branch_id' => $this->mainBranch->id,
+                'product_id' => $product->id,
+                'movement_type' => 'return',
+                'reference_id' => $saleId,
+            ]);
+        }
+
+        // 7. Payments marked refunded
+        $this->assertDatabaseHas('sales_payments', [
+            'sales_order_id' => $saleId,
+            'status' => 'refunded',
+        ]);
+
+        // 8. Audit log created
+        $this->assertDatabaseHas('audit_logs', [
+            'action' => 'SALE_CANCELLED',
+            'auditable_type' => SalesOrder::class,
+            'auditable_id' => $saleId,
+        ]);
+
+        // 9. Cannot cancel an already cancelled sale -> 422
+        $dupCancel = $this->actingAs($this->manager, 'sanctum')
+            ->withHeader('X-Branch-ID', $this->mainBranch->id)
+            ->postJson("/api/v1/sales/{$saleId}/cancel", [
+                'reason' => 'Attempting duplicate cancellation',
+            ]);
+        $dupCancel->assertStatus(422);
     }
 }

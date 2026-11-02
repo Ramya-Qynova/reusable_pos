@@ -43,8 +43,11 @@ class PurchaseController extends Controller
 
     public function storeOrder(Request $request): JsonResponse
     {
+        $activeBranch = app()->has('active_branch') ? app('active_branch') : null;
+        $defaultBranchId = $activeBranch?->id ?? (int) $request->header('X-Branch-ID');
+
         $validated = $request->validate([
-            'branch_id' => 'required|integer|exists:branches,id',
+            'branch_id' => 'nullable|integer|exists:branches,id',
             'supplier_id' => 'required|integer|exists:suppliers,id',
             'order_date' => 'nullable|date',
             'expected_delivery_date' => 'nullable|date',
@@ -57,6 +60,12 @@ class PurchaseController extends Controller
             'items.*.discount_rate' => 'nullable|numeric|min:0|max:100',
             'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $targetBranchId = !empty($validated['branch_id']) ? (int) $validated['branch_id'] : $defaultBranchId;
+        if (!$request->user()->canAccessBranch($targetBranchId)) {
+            return $this->errorResponse('Unauthorized branch operation.', Response::HTTP_FORBIDDEN, null, 'BRANCH_ACCESS_DENIED');
+        }
+        $validated['branch_id'] = $targetBranchId;
 
         $order = $this->purchaseService->createPurchaseOrder($validated, $request->user());
 
@@ -90,8 +99,11 @@ class PurchaseController extends Controller
 
     public function storeGoodsReceipt(Request $request): JsonResponse
     {
+        $activeBranch = app()->has('active_branch') ? app('active_branch') : null;
+        $defaultBranchId = $activeBranch?->id ?? (int) $request->header('X-Branch-ID');
+
         $validated = $request->validate([
-            'branch_id' => 'required|integer|exists:branches,id',
+            'branch_id' => 'nullable|integer|exists:branches,id',
             'supplier_id' => 'required|integer|exists:suppliers,id',
             'purchase_order_id' => 'nullable|integer|exists:purchase_orders,id',
             'supplier_invoice_number' => 'nullable|string|max:100',
@@ -110,9 +122,26 @@ class PurchaseController extends Controller
             'items.*.expiry_date' => 'nullable|date',
         ]);
 
+        $targetBranchId = !empty($validated['branch_id']) ? (int) $validated['branch_id'] : $defaultBranchId;
+        if (!$request->user()->canAccessBranch($targetBranchId)) {
+            return $this->errorResponse('Unauthorized branch operation.', Response::HTTP_FORBIDDEN, null, 'BRANCH_ACCESS_DENIED');
+        }
+        $validated['branch_id'] = $targetBranchId;
+
         $grn = $this->purchaseService->recordGoodsReceipt($validated, $request->user());
 
         return $this->successResponse($grn, 'Goods receipt (GRN) processed and accepted stock added to inventory.', Response::HTTP_CREATED);
+    }
+
+    public function cancelGoodsReceipt(Request $request, GoodsReceiptNote $goodsReceiptNote): JsonResponse
+    {
+        $validated = $request->validate([
+            'reason' => 'required|string|max:255',
+        ]);
+
+        $cancelled = $this->purchaseService->cancelGoodsReceipt($goodsReceiptNote, $request->user(), $validated['reason']);
+
+        return $this->successResponse($cancelled, 'Goods receipt note cancelled and stock reversed successfully.');
     }
 
     public function invoices(Request $request): JsonResponse
@@ -158,6 +187,11 @@ class PurchaseController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        $invoice = PurchaseInvoice::findOrFail((int) $validated['purchase_invoice_id']);
+        if (!$request->user()->canAccessBranch((int) $invoice->branch_id)) {
+            return $this->errorResponse('Unauthorized branch operation.', Response::HTTP_FORBIDDEN, null, 'BRANCH_ACCESS_DENIED');
+        }
+
         $payment = $this->purchaseService->recordPayment($validated, $request->user());
 
         return $this->successResponse($payment, 'Payment recorded and supplier balance updated.', Response::HTTP_CREATED);
@@ -176,9 +210,12 @@ class PurchaseController extends Controller
 
     public function storeReturn(Request $request): JsonResponse
     {
+        $activeBranch = app()->has('active_branch') ? app('active_branch') : null;
+        $defaultBranchId = $activeBranch?->id ?? (int) $request->header('X-Branch-ID');
+
         $validated = $request->validate([
             'supplier_id' => 'required|integer|exists:suppliers,id',
-            'branch_id' => 'required|integer|exists:branches,id',
+            'branch_id' => 'nullable|integer|exists:branches,id',
             'purchase_invoice_id' => 'nullable|integer|exists:purchase_invoices,id',
             'reason' => 'required|string|max:191',
             'return_date' => 'nullable|date',
@@ -189,6 +226,12 @@ class PurchaseController extends Controller
             'items.*.unit_cost' => 'required|numeric|min:0',
             'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $targetBranchId = !empty($validated['branch_id']) ? (int) $validated['branch_id'] : $defaultBranchId;
+        if (!$request->user()->canAccessBranch($targetBranchId)) {
+            return $this->errorResponse('Unauthorized branch operation.', Response::HTTP_FORBIDDEN, null, 'BRANCH_ACCESS_DENIED');
+        }
+        $validated['branch_id'] = $targetBranchId;
 
         $return = $this->purchaseService->recordPurchaseReturn($validated, $request->user());
 

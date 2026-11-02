@@ -5,6 +5,7 @@ namespace App\Services\Sales;
 use App\Models\AuditLog;
 use App\Models\Branch;
 use App\Models\Customer;
+use App\Models\CustomerLedger;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\SalesOrder;
@@ -48,7 +49,14 @@ class SalesService
             $seq = 1;
         }
 
-        return $prefix . str_pad((string) $seq, 4, '0', STR_PAD_LEFT);
+        // Ensure collision-proof sequence even under concurrent checkout
+        $candidate = $prefix . str_pad((string) $seq, 4, '0', STR_PAD_LEFT);
+        while (SalesOrder::withTrashed()->where('invoice_number', $candidate)->exists()) {
+            $seq++;
+            $candidate = $prefix . str_pad((string) $seq, 4, '0', STR_PAD_LEFT);
+        }
+
+        return $candidate;
     }
 
     /**
@@ -57,6 +65,20 @@ class SalesService
     public function createSale(array $data, User $user, Branch $branch): SalesOrder
     {
         $branchId = $branch->id;
+
+        // Idempotency check: prevent duplicate submissions under network retries
+        $idempotencyKey = $data['idempotency_key'] ?? $data['client_reference'] ?? null;
+        if ($idempotencyKey) {
+            $existing = SalesOrder::with(['customer', 'items.product', 'items.variant', 'payments', 'user', 'branch'])
+                ->where('branch_id', $branchId)
+                ->where('metadata->idempotency_key', $idempotencyKey)
+                ->first();
+
+            if ($existing) {
+                return $existing;
+            }
+        }
+
         $itemsData = $data['items'] ?? [];
         if (empty($itemsData)) {
             throw ValidationException::withMessages([
@@ -70,7 +92,27 @@ class SalesService
         $billDiscountRate = isset($data['discount_rate']) ? (float) $data['discount_rate'] : 0.0;
         $billDiscountAmountInput = isset($data['discount_amount']) ? (float) $data['discount_amount'] : 0.0;
 
-        if (($billDiscountRate > 0 || $billDiscountAmountInput > 0) && !$hasDiscountPermission) {
+        // Verify customer and resolve customer group discount if configured
+        $customer = null;
+        $customerId = !empty($data['customer_id']) ? (int) $data['customer_id'] : null;
+        if ($customerId) {
+            $customer = Customer::with('group')->where('id', $customerId)->where('is_active', true)->first();
+            if (!$customer) {
+                throw ValidationException::withMessages([
+                    'customer_id' => ['Selected customer is invalid or inactive.']
+                ]);
+            }
+
+            // If no manual bill discount was provided, auto-apply customer group discount
+            if ($billDiscountRate <= 0 && $billDiscountAmountInput <= 0 && $customer->group && $customer->group->is_active && (float) $customer->group->discount_percentage > 0) {
+                $billDiscountType = 'percentage';
+                $billDiscountRate = (float) $customer->group->discount_percentage;
+            }
+        }
+
+        $isCustomerGroupDiscount = ($customer?->group && (float) $customer->group->discount_percentage > 0 && $billDiscountRate === (float) $customer->group->discount_percentage);
+
+        if (($billDiscountRate > 0 || $billDiscountAmountInput > 0) && !$hasDiscountPermission && !$isCustomerGroupDiscount) {
             throw ValidationException::withMessages([
                 'discount' => ['You do not have permission to apply discounts (pos.discount required).']
             ]);
@@ -90,12 +132,15 @@ class SalesService
             $user,
             $branch,
             $branchId,
+            $customerId,
+            $customer,
             $hasDiscountPermission,
             $billDiscountType,
             $billDiscountRate,
             $billDiscountAmountInput,
             $isGstBill,
-            $activeShift
+            $activeShift,
+            $idempotencyKey
         ) {
             $orderDate = !empty($data['order_date']) ? Carbon::parse($data['order_date']) : now();
             $invoiceNumber = $this->generateInvoiceNumber($branch, $orderDate);
@@ -118,7 +163,9 @@ class SalesService
                     ]);
                 }
 
-                $variantId = !empty($itemInput['product_variant_id']) ? (int) $itemInput['product_variant_id'] : null;
+                $variantId = !empty($itemInput['product_variant_id'])
+                    ? (int) $itemInput['product_variant_id']
+                    : (!empty($itemInput['variant_id']) ? (int) $itemInput['variant_id'] : null);
                 $variant = null;
                 if ($variantId) {
                     $variant = $product->variants->firstWhere('id', $variantId);
@@ -145,9 +192,11 @@ class SalesService
                     }
                 }
 
-                // Determine effective unit price (Never trust client input!)
+                // Determine effective unit price (respects promotional/special branch price if active)
                 $priceInfo = $product->getEffectivePrice($branchId, $variantId);
-                $unitPrice = (float) $priceInfo['selling_price'];
+                $unitPrice = (!empty($priceInfo['special_price']) && (float) $priceInfo['special_price'] > 0)
+                    ? (float) $priceInfo['special_price']
+                    : (float) $priceInfo['selling_price'];
 
                 // Calculate item-level discount
                 $itemDiscountType = $itemInput['discount_type'] ?? null;
@@ -263,9 +312,10 @@ class SalesService
 
             // Customer verification if provided
             $customerId = !empty($data['customer_id']) ? (int) $data['customer_id'] : null;
+            $customer = null;
             if ($customerId) {
-                $customerExists = Customer::where('id', $customerId)->where('is_active', true)->exists();
-                if (!$customerExists) {
+                $customer = Customer::lockForUpdate()->find($customerId);
+                if (!$customer || !$customer->is_active) {
                     throw ValidationException::withMessages([
                         'customer_id' => ['Selected customer is invalid or inactive.']
                     ]);
@@ -337,6 +387,21 @@ class SalesService
                 $paymentStatus = 'partial';
             }
 
+            // Customer Credit Limit Validation
+            $unpaidAmount = max(0, round($grandTotal - $totalPaid, 2));
+            if ($customer && $unpaidAmount > 0) {
+                if ((float) $customer->credit_limit > 0) {
+                    $newBalance = round((float) $customer->current_balance + $unpaidAmount, 2);
+                    if ($newBalance > (float) $customer->credit_limit) {
+                        throw ValidationException::withMessages([
+                            'customer_id' => [
+                                "Customer credit limit exceeded. Current balance: {$customer->current_balance}, Credit Limit: {$customer->credit_limit}, New unpaid amount: {$unpaidAmount}."
+                            ]
+                        ]);
+                    }
+                }
+            }
+
             // Create Sales Order
             $salesOrder = SalesOrder::create([
                 'branch_id' => $branchId,
@@ -361,7 +426,10 @@ class SalesService
                 'paid_amount' => $totalPaid,
                 'change_amount' => $changeAmount,
                 'notes' => $data['notes'] ?? null,
-                'metadata' => $data['metadata'] ?? null,
+                'metadata' => array_merge(
+                    is_array($data['metadata'] ?? null) ? $data['metadata'] : [],
+                    $idempotencyKey ? ['idempotency_key' => $idempotencyKey] : []
+                ),
             ]);
 
             // Save items
@@ -385,6 +453,26 @@ class SalesService
 
             // Deduct stock using centralized stock integration service
             $this->stockService->deductStockForSale($salesOrder);
+
+            // Record customer credit balance & ledger entry if unpaid portion exists
+            if ($customer && $unpaidAmount > 0) {
+                $newBal = round((float) $customer->current_balance + $unpaidAmount, 2);
+                $customer->current_balance = $newBal;
+                $customer->save();
+
+                CustomerLedger::create([
+                    'customer_id' => $customer->id,
+                    'branch_id' => $branchId,
+                    'transaction_type' => 'sale',
+                    'reference_type' => 'sales_order',
+                    'reference_id' => $salesOrder->id,
+                    'transaction_date' => $orderDate->toDateString(),
+                    'debit' => $unpaidAmount,
+                    'credit' => 0.00,
+                    'running_balance' => $newBal,
+                    'notes' => "Sale invoice #{$salesOrder->invoice_number} (Credit amount: {$unpaidAmount})",
+                ]);
+            }
 
             // Audit log
             AuditLog::create([
@@ -515,5 +603,110 @@ class SalesService
                 'other' => round($otherTotal, 2),
             ],
         ];
+    }
+
+    /**
+     * Cancel an existing completed sales order and reverse stock & payments.
+     */
+    public function cancelSale(int $id, int $branchId, User $user, ?string $reason = null): SalesOrder
+    {
+        return DB::transaction(function () use ($id, $branchId, $user, $reason) {
+            $sale = SalesOrder::with(['items', 'payments', 'customer'])
+                ->where('id', $id)
+                ->where('branch_id', $branchId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$sale) {
+                throw ValidationException::withMessages([
+                    'sale' => ['Sales order not found for this branch.']
+                ]);
+            }
+
+            if ($sale->status === 'cancelled') {
+                throw ValidationException::withMessages([
+                    'sale' => ['This sales order has already been cancelled.']
+                ]);
+            }
+
+            if ($sale->status !== 'completed') {
+                throw ValidationException::withMessages([
+                    'sale' => ["Only completed sales can be cancelled (current status: {$sale->status})."]
+                ]);
+            }
+
+            // 1. Reverse stock deductions atomically using lockForUpdate
+            $this->stockService->reverseStockForSale($sale, $reason);
+
+            // 2. Reverse cash portion in register shift if shift is open
+            $cashPaid = (float) $sale->payments
+                ->where('payment_method', 'cash')
+                ->where('status', 'successful')
+                ->sum('amount');
+
+            $changeAmount = (float) $sale->change_amount;
+            $netCashReceived = max(0, round($cashPaid - $changeAmount, 2));
+
+            if ($sale->cash_register_shift_id && $netCashReceived > 0) {
+                $this->cashRegisterService->reverseCashSale($sale->cash_register_shift_id, $netCashReceived);
+            }
+
+            // 3. Mark all payments as refunded
+            SalesPayment::where('sales_order_id', $sale->id)->update([
+                'status' => 'refunded',
+                'updated_at' => now(),
+            ]);
+
+            // 4. Update sales order status and append cancellation note
+            $sale->status = 'cancelled';
+            $cancellationNote = " [CANCELLED: " . ($reason ?: 'No reason provided') . " by {$user->name}]";
+            $sale->notes = trim(($sale->notes ?? '') . $cancellationNote);
+            $sale->save();
+
+            // 5. Reverse customer credit balance & ledger if sale had unpaid credit amount
+            if ($sale->customer_id) {
+                $unpaid = max(0, round((float) $sale->grand_total - (float) $sale->paid_amount, 2));
+                if ($unpaid > 0) {
+                    $customer = Customer::lockForUpdate()->find($sale->customer_id);
+                    if ($customer) {
+                        $newBal = round((float) $customer->current_balance - $unpaid, 2);
+                        $customer->current_balance = $newBal;
+                        $customer->save();
+
+                        CustomerLedger::create([
+                            'customer_id' => $customer->id,
+                            'branch_id' => $branchId,
+                            'transaction_type' => 'credit_adjustment',
+                            'reference_type' => 'sales_order',
+                            'reference_id' => $sale->id,
+                            'transaction_date' => now()->toDateString(),
+                            'debit' => 0.00,
+                            'credit' => $unpaid,
+                            'running_balance' => $newBal,
+                            'notes' => "Reversal of credit charge for cancelled sale #{$sale->invoice_number}",
+                        ]);
+                    }
+                }
+            }
+
+            // 5. Audit log
+            AuditLog::create([
+                'user_id' => $user->id,
+                'branch_id' => $branchId,
+                'action' => 'SALE_CANCELLED',
+                'auditable_type' => SalesOrder::class,
+                'auditable_id' => $sale->id,
+                'new_values' => [
+                    'invoice_number' => $sale->invoice_number,
+                    'grand_total' => $sale->grand_total,
+                    'status' => 'cancelled',
+                    'reason' => $reason,
+                ],
+                'ip_address' => request()->ip() ?? '127.0.0.1',
+                'created_at' => now(),
+            ]);
+
+            return $sale->fresh(['customer', 'items.product', 'items.variant', 'payments', 'user', 'branch']);
+        });
     }
 }

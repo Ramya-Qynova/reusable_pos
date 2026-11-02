@@ -13,9 +13,9 @@ return new class extends Migration
     {
         Schema::create('sales_payments', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('sales_order_id')->constrained('sales_orders')->cascadeOnDelete();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('sales_order_id')->constrained('sales_orders')->restrictOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
             $table->foreignId('cash_register_shift_id')->nullable()->constrained('cash_register_shifts')->nullOnDelete();
             $table->string('payment_method', 30); // cash, upi, card, other
             $table->decimal('amount', 12, 2);

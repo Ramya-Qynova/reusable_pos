@@ -14,8 +14,8 @@ return new class extends Migration
     {
         Schema::create('cash_register_shifts', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
             $table->timestamp('opened_at');
             $table->timestamp('closed_at')->nullable();
             $table->decimal('opening_balance', 12, 2)->default(0.00);
@@ -36,9 +36,9 @@ return new class extends Migration
 
         Schema::create('cash_movements', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('cash_register_shift_id')->constrained('cash_register_shifts')->cascadeOnDelete();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('cash_register_shift_id')->constrained('cash_register_shifts')->restrictOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
             $table->string('type', 20); // cash_in, cash_out
             $table->decimal('amount', 12, 2);
             $table->string('reason');

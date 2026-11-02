@@ -76,4 +76,22 @@ class SaleController extends Controller
 
         return $this->successResponse($summary, 'Sales summary retrieved successfully.');
     }
+
+    /**
+     * Cancel an existing completed sales order and reverse stock & payments.
+     */
+    public function cancel(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'reason' => ['nullable', 'string', 'max:500'],
+        ]);
+
+        $branch = app('active_branch');
+        $user = $request->user();
+        $reason = $request->input('reason', 'Customer return / order cancelled');
+
+        $sale = $this->salesService->cancelSale($id, $branch->id, $user, $reason);
+
+        return $this->successResponse($sale, 'Sale cancelled and stock reversed successfully.');
+    }
 }

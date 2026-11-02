@@ -28,6 +28,38 @@ class BranchStock extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        static::saving(function (BranchStock $stock) {
+            $query = static::where('branch_id', $stock->branch_id)
+                ->where('product_id', $stock->product_id);
+
+            if ($stock->exists) {
+                $query->where('id', '!=', $stock->id);
+            }
+
+            if (!empty($stock->variant_id)) {
+                $query->where('variant_id', $stock->variant_id);
+            } else {
+                $query->whereNull('variant_id');
+            }
+
+            if ($query->exists()) {
+                throw new \DomainException("A duplicate branch stock record cannot be created for branch #{$stock->branch_id}, product #{$stock->product_id}, variant " . ($stock->variant_id ?? 'base') . ".");
+            }
+        });
+    }
+
+    public function getProductVariantIdAttribute(): ?int
+    {
+        return $this->variant_id ? (int) $this->variant_id : null;
+    }
+
+    public function setProductVariantIdAttribute($value): void
+    {
+        $this->attributes['variant_id'] = $value;
+    }
+
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);

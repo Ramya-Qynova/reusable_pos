@@ -26,6 +26,16 @@ interface StockServiceInterface
     public function deductStockForSale(SalesOrder $sale): void;
 
     /**
+     * Reverse stock deductions when a sale is cancelled or returned.
+     * Must be called within database transaction.
+     *
+     * @param SalesOrder $sale
+     * @param string|null $reason
+     * @return void
+     */
+    public function reverseStockForSale(SalesOrder $sale, ?string $reason = null): void;
+
+    /**
      * Get available stock quantity for a product / variant in a branch.
      *
      * @param int $branchId

@@ -69,4 +69,54 @@ class ProductVariant extends Model
     {
         return $this->hasMany(BranchProductPrice::class, 'variant_id');
     }
+
+    public function branchStocks(): HasMany
+    {
+        return $this->hasMany(BranchStock::class, 'variant_id');
+    }
+
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(SalesOrderItem::class, 'product_variant_id');
+    }
+
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class, 'product_variant_id');
+    }
+
+    public function stockBatches(): HasMany
+    {
+        return $this->hasMany(StockBatch::class, 'variant_id');
+    }
+
+    public function adjustmentItems(): HasMany
+    {
+        return $this->hasMany(StockAdjustmentItem::class, 'variant_id');
+    }
+
+    public function transferItems(): HasMany
+    {
+        return $this->hasMany(StockTransferItem::class, 'variant_id');
+    }
+
+    public function purchaseOrderItems(): HasMany
+    {
+        return $this->hasMany(PurchaseOrderItem::class, 'variant_id');
+    }
+
+    public function goodsReceiptItems(): HasMany
+    {
+        return $this->hasMany(GoodsReceiptItem::class, 'variant_id');
+    }
+
+    public function purchaseReturnItems(): HasMany
+    {
+        return $this->hasMany(PurchaseReturnItem::class, 'variant_id');
+    }
+
+    public function salesReturnItems(): HasMany
+    {
+        return $this->hasMany(SalesReturnItem::class, 'variant_id');
+    }
 }

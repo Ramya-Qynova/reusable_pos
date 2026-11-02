@@ -650,21 +650,38 @@ class Phase3CustomersAndSuppliersTest extends TestCase
 
     public function test_prevents_unsafe_deletion_when_supplier_has_active_references(): void
     {
-        // Simulate a dependent transactional table from future phases (purchase_orders)
-        Schema::create('purchase_orders', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('supplier_id')->constrained('suppliers');
-            $table->timestamps();
-        });
+        // Check if purchase_orders table exists or simulate if absent
+        $tableCreated = false;
+        if (!Schema::hasTable('purchase_orders')) {
+            Schema::create('purchase_orders', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('supplier_id')->constrained('suppliers');
+                $table->timestamps();
+            });
+            $tableCreated = true;
+        }
 
         $supplier = Supplier::where('supplier_code', 'SUP-00001')->first();
 
-        // Create referencing record
-        \Illuminate\Support\Facades\DB::table('purchase_orders')->insert([
+        // Create referencing record matching schema requirements
+        $poData = [
             'supplier_id' => $supplier->id,
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+        if (Schema::hasColumn('purchase_orders', 'po_number')) {
+            $poData['po_number'] = 'PO-REF-TEST-001';
+            $poData['branch_id'] = 1;
+            $poData['user_id'] = $this->admin->id;
+            $poData['order_date'] = now();
+            $poData['status'] = 'pending';
+            $poData['subtotal'] = 100.00;
+            $poData['tax_amount'] = 0.00;
+            $poData['discount_amount'] = 0.00;
+            $poData['total_amount'] = 100.00;
+        }
+
+        \Illuminate\Support\Facades\DB::table('purchase_orders')->insert($poData);
 
         $response = $this->actingAs($this->admin, 'sanctum')
             ->deleteJson("/api/v1/suppliers/{$supplier->id}");
@@ -677,8 +694,10 @@ class Phase3CustomersAndSuppliersTest extends TestCase
 
         $this->assertNotSoftDeleted('suppliers', ['id' => $supplier->id]);
 
-        // Clean up mock table
-        Schema::dropIfExists('purchase_orders');
+        // Clean up mock table only if created in this test
+        if ($tableCreated) {
+            Schema::dropIfExists('purchase_orders');
+        }
     }
 
     public function test_supplier_permissions_guard_mutations_from_unauthorized_users(): void

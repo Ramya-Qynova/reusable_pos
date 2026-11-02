@@ -9,7 +9,9 @@ use App\Http\Controllers\Api\V1\CustomerController;
 use App\Http\Controllers\Api\V1\InventoryController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\PurchaseController;
+use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SaleController;
+use App\Http\Controllers\Api\V1\SalesReturnController;
 use App\Http\Controllers\Api\V1\SettingsController;
 use App\Http\Controllers\Api\V1\SupplierController;
 use App\Http\Controllers\Api\V1\SyncController;
@@ -91,45 +93,14 @@ Route::prefix('v1')->group(function () {
         Route::get('/customers', [CustomerController::class, 'index']);
         Route::get('/customers/next-code', [CustomerController::class, 'nextCode']);
         Route::get('/customers/{customer}', [CustomerController::class, 'show']);
+        Route::get('/customers/{customer}/ledger', [CustomerController::class, 'ledger']);
         Route::post('/customers/{customer}/credit-payment', [CustomerController::class, 'recordCreditPayment']);
+        Route::post('/customers/{customer}/payments', [CustomerController::class, 'recordCreditPayment']);
 
         // Suppliers Master (Reading)
         Route::get('/suppliers', [SupplierController::class, 'index']);
         Route::get('/suppliers/next-code', [SupplierController::class, 'nextCode']);
         Route::get('/suppliers/{supplier}', [SupplierController::class, 'show']);
-
-        // Inventory Management
-        Route::get('/inventory/dashboard-stats', [InventoryController::class, 'dashboardStats']);
-        Route::get('/inventory/overview', [InventoryController::class, 'overview']);
-        Route::get('/inventory/stocks', [InventoryController::class, 'index']);
-        Route::post('/inventory/stock-in', [InventoryController::class, 'stockIn']);
-        Route::post('/inventory/stock-out', [InventoryController::class, 'stockOut']);
-        Route::post('/inventory/adjust', [InventoryController::class, 'adjust']);
-        Route::get('/inventory/transfers', [InventoryController::class, 'transfers']);
-        Route::post('/inventory/transfers', [InventoryController::class, 'createTransfer']);
-        Route::post('/inventory/transfers/{transfer}/receive', [InventoryController::class, 'receiveTransfer']);
-        Route::get('/inventory/movements', [InventoryController::class, 'movements']);
-        Route::get('/inventory/valuation', [InventoryController::class, 'valuation']);
-        Route::get('/inventory/batches', [InventoryController::class, 'batches']);
-        Route::post('/inventory/batches', [InventoryController::class, 'storeBatch']);
-
-        // Purchase Management
-        Route::get('/purchases/dashboard-stats', [PurchaseController::class, 'dashboardStats']);
-        Route::get('/purchases/orders', [PurchaseController::class, 'indexOrders']);
-        Route::post('/purchases/orders', [PurchaseController::class, 'storeOrder']);
-        Route::get('/purchases/orders/{order}', [PurchaseController::class, 'showOrder']);
-        Route::get('/purchases/goods-receipts', [PurchaseController::class, 'goodsReceipts']);
-        Route::post('/purchases/goods-receipts', [PurchaseController::class, 'storeGoodsReceipt']);
-        Route::get('/purchases/invoices', [PurchaseController::class, 'invoices']);
-        Route::get('/purchases/payments', [PurchaseController::class, 'payments']);
-        Route::post('/purchases/payments', [PurchaseController::class, 'storePayment']);
-        Route::get('/purchases/returns', [PurchaseController::class, 'returns']);
-        Route::post('/purchases/returns', [PurchaseController::class, 'storeReturn']);
-        Route::get('/purchases/supplier-ledger/{supplierId}', [PurchaseController::class, 'supplierLedger']);
-
-        // Offline Data Synchronization
-        Route::get('/sync/pull', [SyncController::class, 'pull']);
-        Route::post('/sync/push', [SyncController::class, 'push']);
 
         // Mutating Catalog Operations (Guarded by catalog.manage permission)
         Route::middleware('permission:catalog.manage')->group(function () {
@@ -170,12 +141,62 @@ Route::prefix('v1')->group(function () {
         Route::middleware('branch.access')->group(function () {
             Route::get('/branches/current', [BranchController::class, 'current']);
 
+            // Offline Data Synchronization (Scoped to validated active branch)
+            Route::get('/sync/pull', [SyncController::class, 'pull']);
+            Route::post('/sync/push', [SyncController::class, 'push']);
+
+            // Inventory Management - Read APIs
+            Route::get('/inventory/dashboard-stats', [InventoryController::class, 'dashboardStats']);
+            Route::get('/inventory/overview', [InventoryController::class, 'overview']);
+            Route::get('/inventory/stocks', [InventoryController::class, 'index']);
+            Route::get('/inventory/movements', [InventoryController::class, 'movements']);
+            Route::get('/inventory/valuation', [InventoryController::class, 'valuation']);
+            Route::get('/inventory/low-stock-alerts', [InventoryController::class, 'lowStockAlerts']);
+            Route::get('/inventory/batches', [InventoryController::class, 'batches']);
+            Route::get('/inventory/transfers', [InventoryController::class, 'transfers']);
+
+            // Inventory Management - Adjustments, Stock In/Out, Opening Stock (Guarded by inventory.adjust)
+            Route::middleware('permission:inventory.adjust')->group(function () {
+                Route::post('/inventory/stock-in', [InventoryController::class, 'stockIn']);
+                Route::post('/inventory/stock-out', [InventoryController::class, 'stockOut']);
+                Route::post('/inventory/adjust', [InventoryController::class, 'adjust']);
+                Route::post('/inventory/opening-stock', [InventoryController::class, 'openingStock']);
+                Route::post('/inventory/batches', [InventoryController::class, 'storeBatch']);
+            });
+
+            // Inventory Management - Transfers (Guarded by inventory.transfer)
+            Route::middleware('permission:inventory.transfer')->group(function () {
+                Route::post('/inventory/transfers', [InventoryController::class, 'createTransfer']);
+                Route::post('/inventory/transfers/{transfer}/dispatch', [InventoryController::class, 'dispatchTransfer']);
+                Route::post('/inventory/transfers/{transfer}/receive', [InventoryController::class, 'receiveTransfer']);
+            });
+
+            // Purchase Management - Read APIs
+            Route::get('/purchases/dashboard-stats', [PurchaseController::class, 'dashboardStats']);
+            Route::get('/purchases/orders', [PurchaseController::class, 'indexOrders']);
+            Route::get('/purchases/orders/{order}', [PurchaseController::class, 'showOrder']);
+            Route::get('/purchases/goods-receipts', [PurchaseController::class, 'goodsReceipts']);
+            Route::get('/purchases/invoices', [PurchaseController::class, 'invoices']);
+            Route::get('/purchases/payments', [PurchaseController::class, 'payments']);
+            Route::get('/purchases/returns', [PurchaseController::class, 'returns']);
+            Route::get('/purchases/supplier-ledger/{supplierId}', [PurchaseController::class, 'supplierLedger']);
+
+            // Purchase Management - Mutations (Guarded by purchases.manage)
+            Route::middleware('permission:purchases.manage')->group(function () {
+                Route::post('/purchases/orders', [PurchaseController::class, 'storeOrder']);
+                Route::post('/purchases/goods-receipts', [PurchaseController::class, 'storeGoodsReceipt']);
+                Route::post('/purchases/goods-receipts/{goodsReceiptNote}/cancel', [PurchaseController::class, 'cancelGoodsReceipt']);
+                Route::post('/purchases/payments', [PurchaseController::class, 'storePayment']);
+                Route::post('/purchases/returns', [PurchaseController::class, 'storeReturn']);
+            });
+
             // POS Billing & Sales (Guarded by pos.billing permission)
             Route::middleware('permission:pos.billing')->group(function () {
                 Route::get('/sales', [SaleController::class, 'index']);
                 Route::post('/sales', [SaleController::class, 'store']);
                 Route::get('/sales/summary', [SaleController::class, 'summary']);
                 Route::get('/sales/{id}', [SaleController::class, 'show']);
+                Route::post('/sales/{id}/cancel', [SaleController::class, 'cancel'])->middleware('permission:pos.returns');
             });
 
             // Cash Drawer Management (Guarded by cash.drawer permission)
@@ -185,6 +206,31 @@ Route::prefix('v1')->group(function () {
                 Route::post('/cash-register/close', [CashRegisterController::class, 'close']);
                 Route::post('/cash-register/movement', [CashRegisterController::class, 'recordMovement']);
                 Route::get('/cash-register/shifts', [CashRegisterController::class, 'shifts']);
+            });
+
+            // Sales Returns & Credit Notes (Guarded by pos.returns permission)
+            Route::middleware('permission:pos.returns')->group(function () {
+                Route::get('/sales/returns', [SalesReturnController::class, 'index']);
+                Route::post('/sales/returns', [SalesReturnController::class, 'store']);
+                Route::get('/sales/returns/{id}', [SalesReturnController::class, 'show']);
+                Route::get('/credit-notes', [SalesReturnController::class, 'creditNotes']);
+                Route::post('/credit-notes/{id}/redeem', [SalesReturnController::class, 'redeemCreditNote']);
+            });
+
+            // Reports & Business Analytics (Guarded by reports.view_pnl permission)
+            Route::middleware('permission:reports.view_pnl')->prefix('reports')->group(function () {
+                Route::get('/daily-sales', [ReportController::class, 'dailySales']);
+                Route::get('/sales-by-product', [ReportController::class, 'salesByProduct']);
+                Route::get('/sales-by-category', [ReportController::class, 'salesByCategory']);
+                Route::get('/sales-by-customer', [ReportController::class, 'salesByCustomer']);
+                Route::get('/purchases', [ReportController::class, 'purchases']);
+                Route::get('/stock', [ReportController::class, 'stock']);
+                Route::get('/low-stock', [ReportController::class, 'lowStock']);
+                Route::get('/stock-movements', [ReportController::class, 'stockMovements']);
+                Route::get('/customer-outstanding', [ReportController::class, 'customerOutstanding']);
+                Route::get('/supplier-outstanding', [ReportController::class, 'supplierOutstanding']);
+                Route::get('/profit', [ReportController::class, 'profit']);
+                Route::get('/gst', [ReportController::class, 'gst']);
             });
         });
     });

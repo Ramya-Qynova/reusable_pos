@@ -65,6 +65,16 @@ class Customer extends Model
         return $this->hasMany(SalesOrder::class);
     }
 
+    public function returns()
+    {
+        return $this->hasMany(SalesReturn::class);
+    }
+
+    public function creditNotes()
+    {
+        return $this->hasMany(CreditNote::class);
+    }
+
     /**
      * Scope to filter active customers
      */
@@ -94,8 +104,15 @@ class Customer extends Model
      */
     public function hasActiveReferences(): bool
     {
-        // Future phases checks (e.g. sales_orders, customer_credit_ledgers)
         if (Schema::hasTable('sales_orders') && DB::table('sales_orders')->where('customer_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('customer_ledgers') && DB::table('customer_ledgers')->where('customer_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('credit_notes') && DB::table('credit_notes')->where('customer_id', $this->id)->exists()) {
             return true;
         }
 

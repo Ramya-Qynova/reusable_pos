@@ -44,3 +44,6 @@ backend/storage/*.key
 # Backend generated files
 backend/storage/logs/*
 backend/bootstrap/cache/*
+/reusable_pos_backup.sql
+
+/able_pos_backup.sql

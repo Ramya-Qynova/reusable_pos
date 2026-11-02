@@ -36,6 +36,16 @@ class StockMovement extends Model
         ];
     }
 
+    public function getVariantIdAttribute(): ?int
+    {
+        return $this->product_variant_id ? (int) $this->product_variant_id : null;
+    }
+
+    public function setVariantIdAttribute($value): void
+    {
+        $this->attributes['product_variant_id'] = $value;
+    }
+
     public function branch(): BelongsTo
     {
         return $this->belongsTo(Branch::class);

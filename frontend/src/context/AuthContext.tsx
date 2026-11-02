@@ -35,12 +35,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   })
   const [isLoading, setIsLoading] = useState(true)
 
-  // Auto initialize session with Admin credentials if no session exists
-  const autoInitSession = useCallback(async () => {
+  // Verify existing session without hardcoded auto-login
+  const verifySession = useCallback(async () => {
     try {
       const existingToken = localStorage.getItem('pos_auth_token')
       if (existingToken) {
-        // Validate or refresh token
         try {
           const meResp = await apiClient.get(API_ENDPOINTS.auth.me)
           if (meResp.data?.data?.user) {
@@ -48,40 +47,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setIsLoading(false)
             return
           }
-        } catch {
-          // Token expired or invalid, re-authenticate below
-          localStorage.removeItem('pos_auth_token')
+        } catch (error: any) {
+          // Token expired or invalid (401 Unauthorized)
+          if (error?.response?.status === 401) {
+            localStorage.removeItem('pos_auth_token')
+            localStorage.removeItem('pos_auth_user')
+            setToken(null)
+            setUser(null)
+          } else {
+            // Backend offline or network error: preserve cached offline/PWA credentials and defer
+            throw error
+          }
         }
-      }
-
-      // Automatically authenticate as default admin
-      const resp = await apiClient.post(API_ENDPOINTS.auth.login, {
-        email: 'admin@greenmart.pos',
-        password: 'admin123',
-      })
-
-      if (resp.data?.data?.token) {
-        const newToken = resp.data.data.token
-        const newUser = resp.data.data.user
-        const activeBranch = resp.data.data.active_branch
-
-        localStorage.setItem('pos_auth_token', newToken)
-        localStorage.setItem('pos_auth_user', JSON.stringify(newUser))
-        if (activeBranch?.id) {
-          localStorage.setItem('pos_active_branch', String(activeBranch.id))
-        }
-        localStorage.setItem('pos_demo_role', 'admin')
-
-        setToken(newToken)
-        setUser(newUser)
-        setActiveRole('admin')
       }
     } catch (err) {
-      console.warn('Auto auth session init deferred until backend is reachable:', err)
+      console.warn('Session verification deferred until backend is reachable:', err)
       // Retry in 2 seconds if backend was offline
       setTimeout(() => {
-        if (!localStorage.getItem('pos_auth_token')) {
-          autoInitSession()
+        if (localStorage.getItem('pos_auth_token')) {
+          verifySession()
         }
       }, 2000)
     } finally {
@@ -90,8 +74,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [])
 
   useEffect(() => {
-    autoInitSession()
-  }, [autoInitSession])
+    verifySession()
+
+    const handleAuthExpired = () => {
+      setToken(null)
+      setUser(null)
+    }
+
+    window.addEventListener('auth:expired', handleAuthExpired)
+    return () => window.removeEventListener('auth:expired', handleAuthExpired)
+  }, [verifySession])
 
   // Login with Email & Password
   const login = async (email: string, password = 'admin123'): Promise<boolean> => {
@@ -201,4 +193,3 @@ export const useAuth = (): AuthContextType => {
 }
 
 export default AuthContext
-

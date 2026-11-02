@@ -225,10 +225,19 @@ class PurchaseService
 
                 // UPDATE INVENTORY ONLY FOR ACCEPTED RECEIVED QUANTITY
                 if ($acceptedQty > 0) {
-                    $stock = BranchStock::firstOrCreate(
+                    BranchStock::firstOrCreate(
                         ['branch_id' => $branchId, 'product_id' => $productId, 'variant_id' => $variantId],
                         ['quantity' => 0.000, 'damaged_quantity' => 0.000, 'reserved_quantity' => 0.000]
                     );
+
+                    $stockQuery = BranchStock::where('branch_id', $branchId)
+                        ->where('product_id', $productId);
+                    if ($variantId) {
+                        $stockQuery->where('variant_id', $variantId);
+                    } else {
+                        $stockQuery->whereNull('variant_id');
+                    }
+                    $stock = $stockQuery->lockForUpdate()->firstOrFail();
 
                     $prevQty = (float) $stock->quantity;
                     $newQty = $prevQty + $acceptedQty;
@@ -321,6 +330,138 @@ class PurchaseService
             ]);
 
             return $grn->load(['items.product', 'supplier', 'branch', 'purchaseOrder']);
+        });
+    }
+
+    /**
+     * Cancel a Goods Receipt Note safely reversing accepted stock and invoice liabilities.
+     */
+    public function cancelGoodsReceipt(GoodsReceiptNote $grn, User $user, string $reason): GoodsReceiptNote
+    {
+        return DB::transaction(function () use ($grn, $user, $reason) {
+            if ($grn->status === 'cancelled') {
+                throw new \DomainException('Goods receipt note has already been cancelled.');
+            }
+
+            // 1. Validate that all accepted stock is still available at the branch (has not been consumed/sold/transferred)
+            foreach ($grn->items as $item) {
+                $acceptedQty = (float) $item->accepted_quantity;
+                if ($acceptedQty > 0) {
+                    $stockQuery = BranchStock::where('branch_id', $grn->branch_id)
+                        ->where('product_id', $item->product_id);
+                    if ($item->variant_id) {
+                        $stockQuery->where('variant_id', $item->variant_id);
+                    } else {
+                        $stockQuery->whereNull('variant_id');
+                    }
+                    $stock = $stockQuery->lockForUpdate()->first();
+
+                    $available = (float) ($stock?->quantity ?? 0);
+                    if ($available < $acceptedQty) {
+                        $prodName = $item->product?->name ?? "Product #{$item->product_id}";
+                        throw ValidationException::withMessages([
+                            'grn' => ["Cannot cancel GRN: Stock for [{$prodName}] has already been partially consumed or transferred. Available: {$available}, Required to reverse: {$acceptedQty}. Please use a supplier return or inventory adjustment."]
+                        ]);
+                    }
+                }
+            }
+
+            // 2. Safely deduct accepted stock and record reversal movements
+            foreach ($grn->items as $item) {
+                $acceptedQty = (float) $item->accepted_quantity;
+                $damagedQty = (float) $item->damaged_quantity;
+
+                if ($acceptedQty > 0) {
+                    $stockQuery = BranchStock::where('branch_id', $grn->branch_id)
+                        ->where('product_id', $item->product_id);
+                    if ($item->variant_id) {
+                        $stockQuery->where('variant_id', $item->variant_id);
+                    } else {
+                        $stockQuery->whereNull('variant_id');
+                    }
+                    $stock = $stockQuery->lockForUpdate()->first();
+
+                    $prevQty = (float) $stock->quantity;
+                    $newQty = $prevQty - $acceptedQty;
+                    $stock->quantity = $newQty;
+
+                    if ($damagedQty > 0) {
+                        $stock->damaged_quantity = max(0.000, (float) $stock->damaged_quantity - $damagedQty);
+                    }
+
+                    $stock->save();
+
+                    StockMovement::create([
+                        'branch_id' => $grn->branch_id,
+                        'product_id' => $item->product_id,
+                        'product_variant_id' => $item->variant_id,
+                        'movement_type' => 'adjustment_out',
+                        'quantity' => -$acceptedQty,
+                        'previous_quantity' => $prevQty,
+                        'new_quantity' => $newQty,
+                        'unit_cost' => (float) $item->unit_cost,
+                        'reference_type' => 'goods_receipt_cancellation',
+                        'reference_id' => $grn->id,
+                        'reason' => "GRN Cancellation: {$reason}",
+                        'remarks' => "Cancelled GRN #{$grn->grn_number}",
+                        'user_id' => $user->id,
+                    ]);
+                }
+
+                // Revert PO item received quantity
+                if ($item->purchase_order_item_id) {
+                    $poItem = PurchaseOrderItem::find($item->purchase_order_item_id);
+                    if ($poItem) {
+                        $poItem->received_quantity = max(0.000, (float) $poItem->received_quantity - $acceptedQty);
+                        $poItem->save();
+                    }
+                }
+            }
+
+            // 3. Revert PO status if applicable
+            if ($grn->purchase_order_id) {
+                $po = PurchaseOrder::with('items')->find($grn->purchase_order_id);
+                if ($po) {
+                    $anyReceived = $po->items->contains(fn ($it) => (float) $it->received_quantity > 0);
+                    $po->status = $anyReceived ? 'partially_received' : 'pending';
+                    $po->save();
+                }
+            }
+
+            // 4. Void generated purchase invoice & reverse supplier ledger liability
+            $invoices = PurchaseInvoice::where('goods_receipt_note_id', $grn->id)->get();
+            foreach ($invoices as $inv) {
+                if ($inv->paid_amount > 0) {
+                    throw ValidationException::withMessages([
+                        'grn' => ["Cannot cancel GRN: Associated purchase invoice #{$inv->invoice_number} has payments recorded. Reverse the payments first."]
+                    ]);
+                }
+                $invAmount = (float) $inv->total_amount;
+                $inv->delete();
+
+                // Reverse supplier ledger
+                $lastBalance = (float) (SupplierLedger::where('supplier_id', $grn->supplier_id)->latest('id')->value('running_balance') ?? 0);
+                $newBalance = $lastBalance - $invAmount;
+
+                SupplierLedger::create([
+                    'supplier_id' => $grn->supplier_id,
+                    'branch_id' => $grn->branch_id,
+                    'transaction_type' => 'adjustment',
+                    'reference_type' => 'goods_receipt_cancellation',
+                    'reference_id' => $grn->id,
+                    'transaction_date' => now()->toDateString(),
+                    'debit' => $invAmount,
+                    'credit' => 0.00,
+                    'running_balance' => $newBalance,
+                    'description' => "Liability reversal for cancelled GRN #{$grn->grn_number}",
+                ]);
+            }
+
+            $grn->status = 'cancelled';
+            $grn->remarks = ($grn->remarks ? $grn->remarks . " | " : "") . "Cancelled: {$reason}";
+            $grn->save();
+
+            return $grn->fresh(['items.product', 'supplier', 'branch']);
         });
     }
 

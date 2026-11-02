@@ -189,6 +189,22 @@ class CashRegisterService
     }
 
     /**
+     * Reverse cash sales amount in shift (e.g. upon sale cancellation).
+     */
+    public function reverseCashSale(int $shiftId, float $amount): void
+    {
+        $shift = CashRegisterShift::where('id', $shiftId)->first();
+        if ($shift && $shift->status === 'open') {
+            $currentSales = (float) $shift->cash_sales_amount;
+            $newSales = max(0, round($currentSales - $amount, 2));
+            $shift->update([
+                'cash_sales_amount' => $newSales,
+                'expected_closing_balance' => round((float) $shift->opening_balance + $newSales + (float) $shift->cash_in_amount - (float) $shift->cash_out_amount, 2)
+            ]);
+        }
+    }
+
+    /**
      * Get paginated shift history for a branch.
      */
     public function getShiftHistory(int $branchId, ?int $userId = null, int $perPage = 15): LengthAwarePaginator

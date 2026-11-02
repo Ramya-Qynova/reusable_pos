@@ -96,12 +96,27 @@ class Supplier extends Model
      */
     public function hasActiveReferences(): bool
     {
-        // Future phases checks (e.g. purchase_orders, goods_receipt_notes, supplier_payments)
         if (Schema::hasTable('purchase_orders') && DB::table('purchase_orders')->where('supplier_id', $this->id)->exists()) {
             return true;
         }
 
         if (Schema::hasTable('goods_receipt_notes') && DB::table('goods_receipt_notes')->where('supplier_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('purchase_invoices') && DB::table('purchase_invoices')->where('supplier_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('purchase_payments') && DB::table('purchase_payments')->where('supplier_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('supplier_ledgers') && DB::table('supplier_ledgers')->where('supplier_id', $this->id)->exists()) {
+            return true;
+        }
+
+        if (Schema::hasTable('purchase_returns') && DB::table('purchase_returns')->where('supplier_id', $this->id)->exists()) {
             return true;
         }
 

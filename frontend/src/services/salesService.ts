@@ -54,6 +54,14 @@ export const salesService = {
     const response = await apiClient.get<{ success: boolean; data: SalesSummaryResponse }>(API_ENDPOINTS.sales.summary, { params })
     return response.data.data
   },
+
+  async cancelSale(id: number | string, reason?: string): Promise<SalesOrder> {
+    const response = await apiClient.post<{ success: boolean; data: SalesOrder }>(
+      API_ENDPOINTS.sales.cancel(id),
+      { reason }
+    )
+    return response.data.data
+  },
 }
 
 export default salesService

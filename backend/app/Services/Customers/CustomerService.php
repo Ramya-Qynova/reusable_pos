@@ -223,7 +223,7 @@ class CustomerService
     /**
      * Complete Customer Details with ledger and recent orders
      */
-    public function getCustomerDetails(Customer $customer): array
+    public function getCustomerDetails(Customer $customer): Customer
     {
         $customer->load(['group', 'ledgers' => fn ($q) => $q->orderBy('id', 'desc')->take(20)]);
 
@@ -238,27 +238,29 @@ class CustomerService
             ->take(20)
             ->get();
 
-        return [
-            'customer' => $customer,
-            'sales_orders' => $salesOrders,
-            'loyalty_transactions' => $loyaltyTransactions,
-            'total_invoiced' => round((float) \App\Models\SalesOrder::where('customer_id', $customer->id)->sum('grand_total'), 2),
-            'total_paid' => round((float) \App\Models\SalesOrder::where('customer_id', $customer->id)->sum('paid_amount'), 2),
-        ];
+        $customer->setRelation('sales_orders', $salesOrders);
+        $customer->setRelation('loyalty_transactions', $loyaltyTransactions);
+        $customer->setAttribute('total_invoiced', round((float) \App\Models\SalesOrder::where('customer_id', $customer->id)->sum('grand_total'), 2));
+        $customer->setAttribute('total_paid', round((float) \App\Models\SalesOrder::where('customer_id', $customer->id)->sum('paid_amount'), 2));
+
+        return $customer;
     }
 
     /**
-     * Record Credit Collection Payment from customer
+     * Record Credit Collection Payment from customer with invoice payment allocation
      */
     public function recordCreditPayment(Customer $customer, array $data, ?int $userId = null, ?int $branchId = null): \App\Models\CustomerLedger
     {
         return DB::transaction(function () use ($customer, $data, $userId, $branchId) {
             $amount = (float) $data['amount'];
+            if ($amount <= 0) {
+                throw new \InvalidArgumentException('Payment amount must be greater than zero.');
+            }
             $paymentMethod = $data['payment_method'] ?? 'cash';
 
             // Deduct receivable balance
             $currentBal = (float) $customer->current_balance;
-            $newBal = $currentBal - $amount;
+            $newBal = round($currentBal - $amount, 2);
             $customer->current_balance = $newBal;
             $customer->save();
 
@@ -275,8 +277,96 @@ class CustomerService
                 'notes' => $data['notes'] ?? "Credit payment received via {$paymentMethod}",
             ]);
 
+            // Payment Allocation: Allocate to unpaid or partially paid sales orders
+            $remainingToAllocate = $amount;
+            $unpaidOrders = \App\Models\SalesOrder::where('customer_id', $customer->id)
+                ->whereIn('payment_status', ['unpaid', 'partial'])
+                ->orderBy('order_date', 'asc')
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($unpaidOrders as $order) {
+                if ($remainingToAllocate <= 0) {
+                    break;
+                }
+
+                $orderDue = round((float) $order->grand_total - (float) $order->paid_amount, 2);
+                if ($orderDue <= 0) {
+                    continue;
+                }
+
+                $allocated = min($remainingToAllocate, $orderDue);
+                $newPaid = round((float) $order->paid_amount + $allocated, 2);
+                $order->paid_amount = $newPaid;
+                $order->payment_status = ($newPaid >= (float) $order->grand_total) ? 'paid' : 'partial';
+                $order->save();
+
+                \App\Models\SalesPayment::create([
+                    'sales_order_id' => $order->id,
+                    'branch_id' => $branchId ?? $order->branch_id,
+                    'user_id' => $userId ?? $order->user_id,
+                    'payment_method' => $paymentMethod,
+                    'amount' => $allocated,
+                    'payment_reference' => $data['payment_reference'] ?? "Allocated from Credit Pay #{$ledger->id}",
+                    'status' => 'successful',
+                    'payment_date' => now(),
+                    'notes' => "Customer credit allocation",
+                ]);
+
+                $remainingToAllocate = round($remainingToAllocate - $allocated, 2);
+            }
+
+            // Audit log
+            AuditLog::create([
+                'user_id' => $userId,
+                'branch_id' => $branchId,
+                'action' => 'CUSTOMER_CREDIT_PAYMENT',
+                'auditable_type' => Customer::class,
+                'auditable_id' => $customer->id,
+                'new_values' => [
+                    'amount' => $amount,
+                    'payment_method' => $paymentMethod,
+                    'remaining_balance' => $newBal,
+                ],
+                'created_at' => now(),
+            ]);
+
             return $ledger;
         });
+    }
+
+    /**
+     * Get Customer Ledger Statement with complete running balance
+     */
+    public function getCustomerLedgerStatement(Customer $customer, array $filters = []): array
+    {
+        $query = \App\Models\CustomerLedger::where('customer_id', $customer->id);
+
+        if (!empty($filters['from_date'])) {
+            $query->whereDate('transaction_date', '>=', $filters['from_date']);
+        }
+        if (!empty($filters['to_date'])) {
+            $query->whereDate('transaction_date', '<=', $filters['to_date']);
+        }
+        if (!empty($filters['branch_id'])) {
+            $query->where('branch_id', (int) $filters['branch_id']);
+        }
+
+        $entries = $query->orderBy('transaction_date', 'asc')->orderBy('id', 'asc')->get();
+
+        $totalDebit = (float) $entries->sum('debit');
+        $totalCredit = (float) $entries->sum('credit');
+
+        return [
+            'customer' => $customer->load('group'),
+            'opening_balance' => (float) $customer->opening_balance,
+            'current_balance' => (float) $customer->current_balance,
+            'credit_limit' => (float) $customer->credit_limit,
+            'available_credit' => max(0, round((float) $customer->credit_limit - (float) $customer->current_balance, 2)),
+            'total_debit' => round($totalDebit, 2),
+            'total_credit' => round($totalCredit, 2),
+            'entries' => $entries,
+        ];
     }
 
     /**

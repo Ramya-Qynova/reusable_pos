@@ -19,7 +19,6 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            $table->index('code');
             $table->index('is_active');
         });
 
@@ -48,7 +47,7 @@ return new class extends Migration
         // 3. Customer Ledger
         Schema::create('customer_ledgers', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('customer_id')->constrained('customers')->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained('customers')->restrictOnDelete();
             $table->foreignId('branch_id')->nullable()->constrained('branches')->nullOnDelete();
             $table->enum('transaction_type', ['opening_balance', 'sale', 'payment', 'return', 'credit_adjustment']);
             $table->string('reference_type', 60)->nullable(); // sales_order, credit_payment, sales_return
@@ -67,7 +66,7 @@ return new class extends Migration
         // 4. Customer Loyalty Transactions
         Schema::create('customer_loyalty_transactions', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('customer_id')->constrained('customers')->cascadeOnDelete();
+            $table->foreignId('customer_id')->constrained('customers')->restrictOnDelete();
             $table->foreignId('sales_order_id')->nullable()->constrained('sales_orders')->nullOnDelete();
             $table->enum('type', ['earned', 'redeemed', 'expired', 'adjustment'])->default('earned');
             $table->integer('points');

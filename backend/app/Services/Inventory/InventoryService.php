@@ -5,6 +5,7 @@ namespace App\Services\Inventory;
 use App\Models\AuditLog;
 use App\Models\Branch;
 use App\Models\BranchStock;
+use App\Models\BusinessFeature;
 use App\Models\Product;
 use App\Models\StockAdjustment;
 use App\Models\StockBatch;
@@ -158,6 +159,106 @@ class InventoryService
     }
 
     /**
+     * Pessimistic row-locking helper for branch stock record.
+     */
+    protected function getLockedStock(int $branchId, int $productId, ?int $variantId = null): BranchStock
+    {
+        BranchStock::firstOrCreate(
+            ['branch_id' => $branchId, 'product_id' => $productId, 'variant_id' => $variantId],
+            ['quantity' => 0.000, 'damaged_quantity' => 0.000, 'reserved_quantity' => 0.000]
+        );
+
+        $query = BranchStock::where('branch_id', $branchId)
+            ->where('product_id', $productId);
+
+        if ($variantId) {
+            $query->where('variant_id', $variantId);
+        } else {
+            $query->whereNull('variant_id');
+        }
+
+        return $query->lockForUpdate()->firstOrFail();
+    }
+
+    /**
+     * Validate quantity against unit decimal configuration rules.
+     */
+    protected function validateUnitDecimals(Product $product, float $quantity): void
+    {
+        $product->loadMissing('unit');
+        if ($product->unit && !$product->unit->allow_decimals && floor($quantity) != $quantity) {
+            throw ValidationException::withMessages([
+                'quantity' => ["Fractional / decimal quantity is not permitted for product [{$product->name}] using unit [{$product->unit->name}]."]
+            ]);
+        }
+    }
+
+    /**
+     * Record Controlled Opening Stock Entry
+     * Prevents accidental duplicate opening stock initialization.
+     */
+    public function recordOpeningStock(array $data, User $user): array
+    {
+        return DB::transaction(function () use ($data, $user) {
+            $branchId = (int) $data['branch_id'];
+            $remarks = $data['remarks'] ?? 'Initial branch opening stock';
+            $results = [];
+
+            foreach ($data['items'] as $item) {
+                $productId = (int) $item['product_id'];
+                $variantId = !empty($item['variant_id']) ? (int) $item['variant_id'] : null;
+                $quantity = (float) $item['quantity'];
+                $unitCost = !empty($item['unit_cost']) ? (float) $item['unit_cost'] : 0.0;
+
+                $product = Product::with('unit')->findOrFail($productId);
+                $this->validateUnitDecimals($product, $quantity);
+
+                // Check for duplicate opening stock
+                $query = StockMovement::where('branch_id', $branchId)
+                    ->where('product_id', $productId)
+                    ->where('movement_type', 'initial');
+
+                if ($variantId) {
+                    $query->where('product_variant_id', $variantId);
+                } else {
+                    $query->whereNull('product_variant_id');
+                }
+
+                if ($query->exists()) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Opening stock has already been initialized for [{$product->name}] at this branch."]
+                    ]);
+                }
+
+                $stock = $this->getLockedStock($branchId, $productId, $variantId);
+                $prevQty = (float) $stock->quantity;
+                $newQty = $prevQty + $quantity;
+                $stock->quantity = $newQty;
+                $stock->save();
+
+                StockMovement::create([
+                    'branch_id' => $branchId,
+                    'product_id' => $productId,
+                    'product_variant_id' => $variantId,
+                    'movement_type' => 'initial',
+                    'quantity' => $quantity,
+                    'previous_quantity' => $prevQty,
+                    'new_quantity' => $newQty,
+                    'unit_cost' => $unitCost ?: (float) $product->cost_price,
+                    'reference_type' => 'opening_stock',
+                    'reason' => 'Opening Stock Setup',
+                    'remarks' => $remarks,
+                    'user_id' => $user->id,
+                ]);
+
+                $results[] = $stock->fresh(['product', 'branch']);
+            }
+
+            return $results;
+        });
+    }
+
+    /**
      * Record Direct Stock In (e.g. stock receipt, direct delivery)
      */
     public function recordStockIn(array $data, User $user): BranchStock
@@ -170,10 +271,10 @@ class InventoryService
             $unitCost = !empty($data['unit_cost']) ? (float) $data['unit_cost'] : 0.0;
             $remarks = $data['remarks'] ?? 'Direct stock in';
 
-            $stock = BranchStock::firstOrCreate(
-                ['branch_id' => $branchId, 'product_id' => $productId, 'variant_id' => $variantId],
-                ['quantity' => 0.000, 'damaged_quantity' => 0.000, 'reserved_quantity' => 0.000]
-            );
+            $product = Product::with('unit')->findOrFail($productId);
+            $this->validateUnitDecimals($product, $quantity);
+
+            $stock = $this->getLockedStock($branchId, $productId, $variantId);
 
             $prevQty = (float) $stock->quantity;
             $newQty = $prevQty + $quantity;
@@ -188,7 +289,7 @@ class InventoryService
                 'quantity' => $quantity,
                 'previous_quantity' => $prevQty,
                 'new_quantity' => $newQty,
-                'unit_cost' => $unitCost,
+                'unit_cost' => $unitCost ?: (float) $product->cost_price,
                 'reference_type' => 'direct_stock_in',
                 'reason' => $data['reason'] ?? 'Manual Stock In',
                 'remarks' => $remarks,
@@ -211,12 +312,20 @@ class InventoryService
             $quantity = (float) $data['quantity'];
             $remarks = $data['remarks'] ?? 'Stock issued / write-off';
 
-            $stock = BranchStock::firstOrCreate(
-                ['branch_id' => $branchId, 'product_id' => $productId, 'variant_id' => $variantId],
-                ['quantity' => 0.000, 'damaged_quantity' => 0.000, 'reserved_quantity' => 0.000]
-            );
+            $product = Product::with('unit')->findOrFail($productId);
+            $this->validateUnitDecimals($product, $quantity);
 
+            $stock = $this->getLockedStock($branchId, $productId, $variantId);
+
+            $allowNegative = (bool) BusinessFeature::where('feature_key', 'allow_negative_stock')->value('is_enabled');
             $prevQty = (float) $stock->quantity;
+
+            if (!$allowNegative && $prevQty < $quantity) {
+                throw ValidationException::withMessages([
+                    'quantity' => ["Insufficient stock for [{$product->name}]. Available: {$prevQty}, Requested: {$quantity}."]
+                ]);
+            }
+
             $newQty = $prevQty - $quantity;
             $stock->quantity = $newQty;
             $stock->save();
@@ -229,6 +338,7 @@ class InventoryService
                 'quantity' => -$quantity,
                 'previous_quantity' => $prevQty,
                 'new_quantity' => $newQty,
+                'unit_cost' => (float) $product->cost_price,
                 'reference_type' => 'stock_out',
                 'reason' => $data['reason'] ?? 'Manual Stock Out',
                 'remarks' => $remarks,
@@ -247,57 +357,95 @@ class InventoryService
         return DB::transaction(function () use ($data, $user) {
             $branchId = (int) $data['branch_id'];
             $adjNumber = 'ADJ-' . date('Ymd') . '-' . strtoupper(Str::random(5));
+            $type = $data['type'] ?? 'addition';
 
             $adjustment = StockAdjustment::create([
                 'adjustment_number' => $adjNumber,
                 'branch_id' => $branchId,
                 'user_id' => $user->id,
                 'reason' => $data['reason'],
-                'type' => $data['type'] ?? 'addition',
+                'type' => $type,
                 'notes' => $data['notes'] ?? null,
             ]);
+
+            $allowNegative = (bool) BusinessFeature::where('feature_key', 'allow_negative_stock')->value('is_enabled');
 
             foreach ($data['items'] as $item) {
                 $productId = (int) $item['product_id'];
                 $variantId = !empty($item['variant_id']) ? (int) $item['variant_id'] : null;
-                $adjQty = (float) $item['quantity_adjusted']; // can be + or -
+                $adjQty = (float) $item['quantity_adjusted'];
                 $unitCost = !empty($item['unit_cost']) ? (float) $item['unit_cost'] : 0.0;
+
+                $product = Product::with('unit')->findOrFail($productId);
+                $this->validateUnitDecimals($product, abs($adjQty));
+
+                $stock = $this->getLockedStock($branchId, $productId, $variantId);
+                $prevQty = (float) $stock->quantity;
+
+                if ($type === 'damage') {
+                    $deductQty = abs($adjQty);
+                    if (!$allowNegative && $prevQty < $deductQty) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Insufficient stock to record damage for [{$product->name}]. Available: {$prevQty}, Damaged: {$deductQty}"]
+                        ]);
+                    }
+                    $newQty = $prevQty - $deductQty;
+                    $stock->quantity = $newQty;
+                    $stock->damaged_quantity = (float) $stock->damaged_quantity + $deductQty;
+                    $movementType = 'damage';
+                    $movementQty = -$deductQty;
+                } elseif ($type === 'subtraction') {
+                    $deductQty = abs($adjQty);
+                    if (!$allowNegative && $prevQty < $deductQty) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Insufficient stock for adjustment subtraction of [{$product->name}]. Available: {$prevQty}, Requested: {$deductQty}"]
+                        ]);
+                    }
+                    $newQty = $prevQty - $deductQty;
+                    $stock->quantity = $newQty;
+                    $movementType = 'adjustment_out';
+                    $movementQty = -$deductQty;
+                } elseif ($type === 'physical_count') {
+                    $diff = $adjQty - $prevQty;
+                    if (!$allowNegative && $adjQty < 0) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Count correction cannot result in negative stock for [{$product->name}]."]
+                        ]);
+                    }
+                    $newQty = $adjQty;
+                    $stock->quantity = $newQty;
+                    $movementType = $diff >= 0 ? 'adjustment_in' : 'adjustment_out';
+                    $movementQty = $diff;
+                } else {
+                    $addQty = abs($adjQty);
+                    $newQty = $prevQty + $addQty;
+                    $stock->quantity = $newQty;
+                    $movementType = 'adjustment_in';
+                    $movementQty = $addQty;
+                }
+
+                $stock->save();
 
                 $adjustment->items()->create([
                     'product_id' => $productId,
                     'variant_id' => $variantId,
                     'quantity_adjusted' => $adjQty,
-                    'unit_cost' => $unitCost,
+                    'unit_cost' => $unitCost ?: (float) $product->cost_price,
                 ]);
-
-                $stock = BranchStock::firstOrCreate(
-                    ['branch_id' => $branchId, 'product_id' => $productId, 'variant_id' => $variantId],
-                    ['quantity' => 0.000, 'damaged_quantity' => 0.000, 'reserved_quantity' => 0.000]
-                );
-
-                $prevQty = (float) $stock->quantity;
-                $newQty = $prevQty + $adjQty;
-                $stock->quantity = $newQty;
-
-                if ($data['type'] === 'damage') {
-                    $stock->damaged_quantity = (float) $stock->damaged_quantity + abs($adjQty);
-                }
-
-                $stock->save();
 
                 StockMovement::create([
                     'branch_id' => $branchId,
                     'product_id' => $productId,
                     'product_variant_id' => $variantId,
-                    'movement_type' => 'adjustment',
-                    'quantity' => $adjQty,
+                    'movement_type' => $movementType,
+                    'quantity' => $movementQty,
                     'previous_quantity' => $prevQty,
                     'new_quantity' => $newQty,
-                    'unit_cost' => $unitCost,
+                    'unit_cost' => $unitCost ?: (float) $product->cost_price,
                     'reference_type' => 'stock_adjustment',
                     'reference_id' => $adjustment->id,
                     'reason' => $data['reason'],
-                    'remarks' => "Stock adjustment: {$adjNumber}",
+                    'remarks' => "Stock adjustment: {$adjNumber} ({$type})",
                     'user_id' => $user->id,
                 ]);
             }
@@ -307,7 +455,7 @@ class InventoryService
     }
 
     /**
-     * Create / Dispatch Inter-Branch Stock Transfer
+     * Create Inter-Branch Stock Transfer (as draft or dispatched)
      */
     public function createStockTransfer(array $data, User $user): StockTransfer
     {
@@ -321,22 +469,48 @@ class InventoryService
                 ]);
             }
 
+            $status = $data['status'] ?? 'draft';
+            $isDispatched = ($status === 'dispatched');
+
             $transferNum = 'TRF-' . date('Ymd') . '-' . strtoupper(Str::random(5));
 
             $transfer = StockTransfer::create([
                 'transfer_number' => $transferNum,
                 'source_branch_id' => $sourceBranchId,
                 'destination_branch_id' => $destBranchId,
-                'status' => 'dispatched',
-                'dispatch_date' => now(),
-                'dispatched_by' => $user->id,
+                'status' => $status,
+                'dispatch_date' => $isDispatched ? now() : null,
+                'dispatched_by' => $isDispatched ? $user->id : null,
                 'notes' => $data['notes'] ?? null,
             ]);
 
+            $allowNegative = (bool) BusinessFeature::where('feature_key', 'allow_negative_stock')->value('is_enabled');
+
             foreach ($data['items'] as $item) {
                 $productId = (int) $item['product_id'];
-                $variantId = !empty($item['variant_id']) ? (int) $item['variant_id'] : null;
+                $variantId = !empty($item['variant_id'])
+                    ? (int) $item['variant_id']
+                    : (!empty($item['product_variant_id']) ? (int) $item['product_variant_id'] : null);
                 $qty = (float) $item['quantity_sent'];
+
+                $product = Product::with('unit')->findOrFail($productId);
+                $this->validateUnitDecimals($product, $qty);
+
+                if ($isDispatched) {
+                    // Lock source branch stock with pessimistic row lock
+                    $srcStock = $this->getLockedStock($sourceBranchId, $productId, $variantId);
+                    $prevQty = (float) $srcStock->quantity;
+
+                    if (!$allowNegative && $prevQty < $qty) {
+                        throw ValidationException::withMessages([
+                            'items' => ["Insufficient stock at source branch for [{$product->name}]. Available: {$prevQty}, Requested to transfer: {$qty}"]
+                        ]);
+                    }
+
+                    $newQty = $prevQty - $qty;
+                    $srcStock->quantity = $newQty;
+                    $srcStock->save();
+                }
 
                 $transfer->items()->create([
                     'product_id' => $productId,
@@ -346,13 +520,61 @@ class InventoryService
                     'notes' => $item['notes'] ?? null,
                 ]);
 
-                // Deduct from source branch
-                $srcStock = BranchStock::firstOrCreate(
-                    ['branch_id' => $sourceBranchId, 'product_id' => $productId, 'variant_id' => $variantId],
-                    ['quantity' => 0.000]
-                );
+                if ($isDispatched) {
+                    StockMovement::create([
+                        'branch_id' => $sourceBranchId,
+                        'product_id' => $productId,
+                        'product_variant_id' => $variantId,
+                        'movement_type' => 'transfer_out',
+                        'quantity' => -$qty,
+                        'previous_quantity' => $prevQty,
+                        'new_quantity' => $newQty,
+                        'reference_type' => 'stock_transfer',
+                        'reference_id' => $transfer->id,
+                        'reason' => "Transfer dispatch to branch #{$destBranchId}",
+                        'remarks' => "Transfer {$transferNum}",
+                        'user_id' => $user->id,
+                    ]);
+                }
+            }
 
+            return $transfer->load(['items.product', 'sourceBranch', 'destinationBranch']);
+        });
+    }
+
+    /**
+     * Dispatch an existing draft Stock Transfer (deducts stock exactly once)
+     */
+    public function dispatchStockTransfer(StockTransfer $transfer, User $user): StockTransfer
+    {
+        return DB::transaction(function () use ($transfer, $user) {
+            $transfer = StockTransfer::where('id', $transfer->id)->lockForUpdate()->firstOrFail();
+
+            if ($transfer->status !== 'draft') {
+                throw new \DomainException("Cannot dispatch transfer with status [{$transfer->status}]. Only draft transfers can be dispatched.");
+            }
+
+            $sourceBranchId = $transfer->source_branch_id;
+            $destBranchId = $transfer->destination_branch_id;
+            $allowNegative = (bool) BusinessFeature::where('feature_key', 'allow_negative_stock')->value('is_enabled');
+
+            foreach ($transfer->items as $item) {
+                $productId = $item->product_id;
+                $variantId = $item->variant_id;
+                $qty = (float) $item->quantity_sent;
+
+                $product = Product::with('unit')->findOrFail($productId);
+                $this->validateUnitDecimals($product, $qty);
+
+                $srcStock = $this->getLockedStock($sourceBranchId, $productId, $variantId);
                 $prevQty = (float) $srcStock->quantity;
+
+                if (!$allowNegative && $prevQty < $qty) {
+                    throw ValidationException::withMessages([
+                        'items' => ["Insufficient stock at source branch for [{$product->name}]. Available: {$prevQty}, Requested to transfer: {$qty}"]
+                    ]);
+                }
+
                 $newQty = $prevQty - $qty;
                 $srcStock->quantity = $newQty;
                 $srcStock->save();
@@ -368,39 +590,58 @@ class InventoryService
                     'reference_type' => 'stock_transfer',
                     'reference_id' => $transfer->id,
                     'reason' => "Transfer dispatch to branch #{$destBranchId}",
-                    'remarks' => "Transfer {$transferNum}",
+                    'remarks' => "Transfer {$transfer->transfer_number}",
                     'user_id' => $user->id,
                 ]);
             }
 
-            return $transfer->load(['items.product', 'sourceBranch', 'destinationBranch']);
+            $transfer->update([
+                'status' => 'dispatched',
+                'dispatch_date' => now(),
+                'dispatched_by' => $user->id,
+            ]);
+
+            return $transfer->fresh(['items.product', 'sourceBranch', 'destinationBranch']);
         });
     }
 
     /**
-     * Receive an in-transit Stock Transfer
+     * Receive an in-transit Stock Transfer with Discrepancy & Damage Tracking
      */
-    public function receiveStockTransfer(StockTransfer $transfer, User $user): StockTransfer
+    public function receiveStockTransfer(StockTransfer $transfer, User $user, array $receiptData = []): StockTransfer
     {
-        return DB::transaction(function () use ($transfer, $user) {
-            if ($transfer->status === 'received') {
-                throw new \DomainException('Transfer has already been received.');
+        return DB::transaction(function () use ($transfer, $user, $receiptData) {
+            // Lock transfer header to prevent concurrent receipt race conditions
+            $transfer = StockTransfer::where('id', $transfer->id)->lockForUpdate()->firstOrFail();
+
+            if ($transfer->status !== 'dispatched') {
+                throw new \DomainException("Cannot receive transfer with status [{$transfer->status}]. Only dispatched transfers can be received.");
             }
 
             $destBranchId = $transfer->destination_branch_id;
+            $itemsMap = collect($receiptData['items'] ?? [])->keyBy('product_id');
 
             foreach ($transfer->items as $item) {
-                $destStock = BranchStock::firstOrCreate(
-                    ['branch_id' => $destBranchId, 'product_id' => $item->product_id, 'variant_id' => $item->variant_id],
-                    ['quantity' => 0.000]
-                );
+                $itemInput = $itemsMap->get($item->product_id);
+                $acceptedQty = isset($itemInput['accepted_quantity'])
+                    ? (float) $itemInput['accepted_quantity']
+                    : (isset($itemInput['quantity_received']) ? (float) $itemInput['quantity_received'] : (float) $item->quantity_sent);
+                $damagedQty = isset($itemInput['damaged_quantity'])
+                    ? (float) $itemInput['damaged_quantity']
+                    : 0.000;
 
+                $destStock = $this->getLockedStock($destBranchId, $item->product_id, $item->variant_id);
                 $prevQty = (float) $destStock->quantity;
-                $newQty = $prevQty + (float) $item->quantity_sent;
+                $newQty = $prevQty + $acceptedQty;
                 $destStock->quantity = $newQty;
+
+                if ($damagedQty > 0) {
+                    $destStock->damaged_quantity = (float) $destStock->damaged_quantity + $damagedQty;
+                }
+
                 $destStock->save();
 
-                $item->quantity_received = $item->quantity_sent;
+                $item->quantity_received = $acceptedQty;
                 $item->save();
 
                 StockMovement::create([
@@ -408,13 +649,13 @@ class InventoryService
                     'product_id' => $item->product_id,
                     'product_variant_id' => $item->variant_id,
                     'movement_type' => 'transfer_in',
-                    'quantity' => (float) $item->quantity_sent,
+                    'quantity' => $acceptedQty,
                     'previous_quantity' => $prevQty,
                     'new_quantity' => $newQty,
                     'reference_type' => 'stock_transfer',
                     'reference_id' => $transfer->id,
                     'reason' => "Transfer received from branch #{$transfer->source_branch_id}",
-                    'remarks' => "Transfer {$transfer->transfer_number}",
+                    'remarks' => "Transfer {$transfer->transfer_number}" . ($damagedQty > 0 ? " (Damaged: {$damagedQty})" : ""),
                     'user_id' => $user->id,
                 ]);
             }
@@ -427,6 +668,37 @@ class InventoryService
 
             return $transfer->fresh(['items.product', 'sourceBranch', 'destinationBranch']);
         });
+    }
+
+    /**
+     * Get Low Stock Alerts
+     */
+    public function getLowStockAlerts(?int $branchId = null): array
+    {
+        $query = BranchStock::query()
+            ->with(['product.unit', 'product.category', 'branch:id,name,branch_code', 'variant'])
+            ->whereHas('product', function ($q) {
+                $q->whereColumn('branch_stocks.quantity', '<=', 'products.minimum_stock');
+            });
+
+        if ($branchId) {
+            $query->where('branch_id', $branchId);
+        }
+
+        return $query->get()->map(function ($stk) {
+            return [
+                'id' => $stk->id,
+                'branch_id' => $stk->branch_id,
+                'branch_name' => $stk->branch?->name,
+                'product_id' => $stk->product_id,
+                'product_name' => $stk->product?->name,
+                'sku' => $stk->product?->sku,
+                'unit' => $stk->product?->unit?->short_code,
+                'current_quantity' => (float) $stk->quantity,
+                'minimum_stock' => (float) ($stk->product?->minimum_stock ?? 0),
+                'shortage' => max(0, (float) ($stk->product?->minimum_stock ?? 0) - (float) $stk->quantity),
+            ];
+        })->toArray();
     }
 
     /**

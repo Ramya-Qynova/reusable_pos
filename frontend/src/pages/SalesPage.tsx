@@ -154,11 +154,36 @@ export const SalesPage: React.FC = () => {
   const [salesFilterToDate, setSalesFilterToDate] = useState('')
   const [selectedInvoiceDetails, setSelectedInvoiceDetails] = useState<SalesOrder | null>(null)
   const [isInvoiceDetailsModalOpen, setIsInvoiceDetailsModalOpen] = useState(false)
+  const [cancelSaleTarget, setCancelSaleTarget] = useState<SalesOrder | null>(null)
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false)
+  const [cancellationReason, setCancellationReason] = useState('')
+  const [isSubmittingCancel, setIsSubmittingCancel] = useState(false)
   const [salesSummary, setSalesSummary] = useState<{
     total_sales_count: number
     total_revenue: number
     payment_breakdown: { cash: number; upi: number; card: number; other: number }
   } | null>(null)
+
+  const handleCancelSale = async () => {
+    if (!cancelSaleTarget) return
+    try {
+      setIsSubmittingCancel(true)
+      const updated = await salesService.cancelSale(cancelSaleTarget.id, cancellationReason)
+      notify('Sale Cancelled', 'success', `Sale ${updated.invoice_number} cancelled and inventory restored.`)
+      setIsCancelModalOpen(false)
+      setIsInvoiceDetailsModalOpen(false)
+      setCancellationReason('')
+      setCancelSaleTarget(null)
+      loadSalesHistory()
+      loadCurrentShift()
+    } catch (err: unknown) {
+      console.error('Cancellation failed:', err)
+      const data = (err as { response?: { data?: { message?: string } } })?.response?.data
+      notify('Cancellation Failed', 'error', data?.message || 'Failed to cancel sale order')
+    } finally {
+      setIsSubmittingCancel(false)
+    }
+  }
 
   // Barcode Scanner Listener buffer
   const barcodeBufferRef = useRef('')
@@ -2298,23 +2323,73 @@ export const SalesPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 border-t pt-3">
-              <Button variant="outline" onClick={() => setIsInvoiceDetailsModalOpen(false)}>
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => {
-                  setCompletedSale(selectedInvoiceDetails)
-                  setIsReceiptModalOpen(true)
-                }}
-              >
-                <Printer className="mr-1.5 h-4 w-4" />
-                Print Receipt
-              </Button>
+            <div className="flex items-center justify-between border-t pt-3">
+              <div>
+                {selectedInvoiceDetails.status === 'completed' && canApplyDiscount && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => {
+                      setCancelSaleTarget(selectedInvoiceDetails)
+                      setIsCancelModalOpen(true)
+                    }}
+                  >
+                    <X className="mr-1.5 h-3.5 w-3.5" />
+                    Void / Cancel Sale
+                  </Button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setIsInvoiceDetailsModalOpen(false)}>
+                  Close
+                </Button>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    setCompletedSale(selectedInvoiceDetails)
+                    setIsReceiptModalOpen(true)
+                  }}
+                >
+                  <Printer className="mr-1.5 h-4 w-4" />
+                  Print Receipt
+                </Button>
+              </div>
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Sale Cancellation Modal */}
+      <Modal
+        isOpen={isCancelModalOpen}
+        onClose={() => setIsCancelModalOpen(false)}
+        title={`Cancel Sale: ${cancelSaleTarget?.invoice_number || ''}`}
+      >
+        <div className="space-y-4 text-xs">
+          <p className="text-gray-600">
+            Are you sure you want to cancel this sale? Stock deductions will be restored to branch inventory, payments marked refunded, and cashier register totals updated.
+          </p>
+          <div>
+            <label className="mb-1 block font-medium text-gray-700">Reason for Cancellation</label>
+            <Input
+              value={cancellationReason}
+              onChange={(e) => setCancellationReason(e.target.value)}
+              placeholder="e.g. Customer returned goods / erroneous entry"
+            />
+          </div>
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="outline" onClick={() => setIsCancelModalOpen(false)}>
+              Keep Order
+            </Button>
+            <Button
+              variant="danger"
+              disabled={isSubmittingCancel}
+              onClick={handleCancelSale}
+            >
+              {isSubmittingCancel ? 'Cancelling...' : 'Confirm Cancellation'}
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   )

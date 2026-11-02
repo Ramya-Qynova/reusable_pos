@@ -11,24 +11,25 @@ return new class extends Migration
         // 1. Branch Stock Balances
         Schema::create('branch_stocks', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
-            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
+            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->restrictOnDelete();
+            $table->unsignedBigInteger('variant_key')->storedAs('COALESCE(variant_id, 0)');
             $table->decimal('quantity', 12, 3)->default(0.000);
             $table->decimal('damaged_quantity', 12, 3)->default(0.000);
             $table->decimal('reserved_quantity', 12, 3)->default(0.000);
             $table->timestamps();
 
-            $table->unique(['branch_id', 'product_id', 'variant_id'], 'branch_prod_var_unique');
+            $table->unique(['branch_id', 'product_id', 'variant_key'], 'branch_prod_var_unique');
             $table->index(['branch_id', 'product_id']);
         });
 
         // 2. Stock Batches & Expiry Management
         Schema::create('stock_batches', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
-            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
+            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->restrictOnDelete();
             $table->string('batch_number', 60);
             $table->date('manufacturing_date')->nullable();
             $table->date('expiry_date')->nullable();
@@ -46,9 +47,9 @@ return new class extends Migration
         // 3. Stock Movements (Comprehensive Audit Ledger)
         Schema::create('stock_movements', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
-            $table->foreignId('product_variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
+            $table->foreignId('product_variant_id')->nullable()->constrained('product_variants')->restrictOnDelete();
             $table->string('movement_type', 40); // purchase_receipt, sale, adjustment_in, adjustment_out, transfer_in, transfer_out, damage, return
             $table->decimal('quantity', 12, 3); // positive for increase, negative for deduction
             $table->decimal('previous_quantity', 12, 3)->default(0.000);
@@ -70,8 +71,8 @@ return new class extends Migration
         Schema::create('stock_adjustments', function (Blueprint $table) {
             $table->id();
             $table->string('adjustment_number', 50)->unique();
-            $table->foreignId('branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('user_id')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('user_id')->constrained('users')->restrictOnDelete();
             $table->string('reason', 100); // count_mismatch, damaged, expired, theft, write_off, initial_stock, other
             $table->enum('type', ['addition', 'subtraction', 'damage', 'physical_count'])->default('addition');
             $table->text('notes')->nullable();
@@ -85,8 +86,8 @@ return new class extends Migration
         Schema::create('stock_adjustment_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('stock_adjustment_id')->constrained('stock_adjustments')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
-            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
+            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->restrictOnDelete();
             $table->decimal('quantity_adjusted', 12, 3); // positive or negative
             $table->decimal('unit_cost', 12, 2)->default(0.00);
             $table->timestamps();
@@ -96,12 +97,12 @@ return new class extends Migration
         Schema::create('stock_transfers', function (Blueprint $table) {
             $table->id();
             $table->string('transfer_number', 50)->unique();
-            $table->foreignId('source_branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->foreignId('destination_branch_id')->constrained('branches')->cascadeOnDelete();
-            $table->enum('status', ['draft', 'dispatched', 'received', 'cancelled'])->default('dispatched');
+            $table->foreignId('source_branch_id')->constrained('branches')->restrictOnDelete();
+            $table->foreignId('destination_branch_id')->constrained('branches')->restrictOnDelete();
+            $table->enum('status', ['draft', 'dispatched', 'received', 'cancelled'])->default('draft');
             $table->dateTime('dispatch_date')->nullable();
             $table->dateTime('receive_date')->nullable();
-            $table->foreignId('dispatched_by')->constrained('users')->cascadeOnDelete();
+            $table->foreignId('dispatched_by')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('received_by')->nullable()->constrained('users')->nullOnDelete();
             $table->text('notes')->nullable();
             $table->timestamps();
@@ -115,8 +116,8 @@ return new class extends Migration
         Schema::create('stock_transfer_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('stock_transfer_id')->constrained('stock_transfers')->cascadeOnDelete();
-            $table->foreignId('product_id')->constrained('products')->cascadeOnDelete();
-            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->nullOnDelete();
+            $table->foreignId('product_id')->constrained('products')->restrictOnDelete();
+            $table->foreignId('variant_id')->nullable()->constrained('product_variants')->restrictOnDelete();
             $table->decimal('quantity_sent', 12, 3);
             $table->decimal('quantity_received', 12, 3)->default(0.000);
             $table->string('notes')->nullable();
