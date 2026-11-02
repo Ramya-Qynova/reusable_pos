@@ -17,6 +17,7 @@ class StoreProductRequest extends FormRequest
     {
         return [
             'category_id' => ['required', 'integer', 'exists:categories,id'],
+            'brand_id' => ['nullable', 'integer', 'exists:brands,id'],
             'unit_id' => ['required', 'integer', 'exists:units,id'],
             'tax_slab_id' => ['nullable', 'integer', 'exists:tax_slabs,id'],
             'name' => ['required', 'string', 'max:191'],
@@ -27,10 +28,13 @@ class StoreProductRequest extends FormRequest
             'is_tax_inclusive' => ['nullable', 'boolean'],
             'cost_price' => ['required', 'numeric', 'min:0'],
             'selling_price' => ['required', 'numeric', 'min:0'],
+            'mrp' => ['nullable', 'numeric', 'min:0'],
             'minimum_stock' => ['nullable', 'numeric', 'min:0'],
             'has_variants' => ['nullable', 'boolean'],
             'is_active' => ['nullable', 'boolean'],
             'metadata' => ['nullable', 'array'],
+            'description' => ['nullable', 'string'],
+            'image_url' => ['nullable', 'string', 'max:500'],
 
             // Nested variants
             'variants' => ['nullable', 'array'],

@@ -44,6 +44,36 @@ class Supplier extends Model
         return $query->where('is_active', true);
     }
 
+    public function purchaseOrders()
+    {
+        return $this->hasMany(PurchaseOrder::class);
+    }
+
+    public function goodsReceipts()
+    {
+        return $this->hasMany(GoodsReceiptNote::class);
+    }
+
+    public function invoices()
+    {
+        return $this->hasMany(PurchaseInvoice::class);
+    }
+
+    public function payments()
+    {
+        return $this->hasMany(PurchasePayment::class);
+    }
+
+    public function returns()
+    {
+        return $this->hasMany(PurchaseReturn::class);
+    }
+
+    public function ledgers()
+    {
+        return $this->hasMany(SupplierLedger::class);
+    }
+
     /**
      * Scope to search by code, name, contact person, phone, or email
      */

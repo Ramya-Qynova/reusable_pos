@@ -1,0 +1,18 @@
+{
+  "name": "POS System - Green Mart Supermarket",
+  "short_name": "GreenMart POS",
+  "description": "Enterprise Point of Sale and Inventory Management System",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F5F7FB",
+  "theme_color": "#D45060",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+

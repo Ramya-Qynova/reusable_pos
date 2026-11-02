@@ -62,8 +62,10 @@ class CustomerController extends Controller
      */
     public function show(Customer $customer): JsonResponse
     {
+        $details = $this->customerService->getCustomerDetails($customer);
+
         return $this->successResponse(
-            $customer,
+            $details,
             'Customer details retrieved successfully.'
         );
     }
@@ -137,6 +139,142 @@ class CustomerController extends Controller
         return $this->successResponse([
             'next_code' => $this->customerService->generateCustomerCode(),
         ], 'Next customer code generated.');
+    }
+
+    /**
+     * Customer Master dashboard statistics
+     */
+    public function dashboardStats(): JsonResponse
+    {
+        $stats = $this->customerService->getDashboardStats();
+
+        return $this->successResponse($stats, 'Customer dashboard statistics retrieved.');
+    }
+
+    /**
+     * Customer Groups list
+     */
+    public function groups(): JsonResponse
+    {
+        $groups = $this->customerService->getCustomerGroups();
+
+        return $this->successResponse($groups, 'Customer groups retrieved.');
+    }
+
+    /**
+     * Store customer group
+     */
+    public function storeGroup(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:100',
+            'code' => 'nullable|string|max:50|unique:customer_groups,code',
+            'discount_percentage' => 'nullable|numeric|min:0|max:100',
+            'credit_limit' => 'nullable|numeric|min:0',
+            'description' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
+        ]);
+
+        $group = $this->customerService->createCustomerGroup($validated);
+
+        return $this->successResponse($group, 'Customer group created successfully.', Response::HTTP_CREATED);
+    }
+
+    /**
+     * Update customer group
+     */
+    public function updateGroup(Request $request, \App\Models\CustomerGroup $group): JsonResponse
+    {
+        $validated = $request->validate([
+            'name' => 'required|string|max:100',
+            'code' => 'nullable|string|max:50|unique:customer_groups,code,' . $group->id,
+            'discount_percentage' => 'nullable|numeric|min:0|max:100',
+            'credit_limit' => 'nullable|numeric|min:0',
+            'description' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
+        ]);
+
+        $updated = $this->customerService->updateCustomerGroup($group, $validated);
+
+        return $this->successResponse($updated, 'Customer group updated successfully.');
+    }
+
+    /**
+     * Delete customer group
+     */
+    public function destroyGroup(\App\Models\CustomerGroup $group): JsonResponse
+    {
+        try {
+            $this->customerService->deleteCustomerGroup($group);
+            return $this->successResponse(null, 'Customer group deleted successfully.');
+        } catch (\Throwable $e) {
+            return $this->errorResponse($e->getMessage(), Response::HTTP_CONFLICT);
+        }
+    }
+
+    /**
+     * Record payment received against customer credit
+     */
+    public function recordCreditPayment(Request $request, Customer $customer): JsonResponse
+    {
+        $validated = $request->validate([
+            'amount' => 'required|numeric|min:0.01',
+            'payment_date' => 'nullable|date',
+            'payment_method' => 'nullable|in:cash,card,bank_transfer,upi,cheque',
+            'notes' => 'nullable|string|max:500',
+        ]);
+
+        $branchId = $request->header('X-Branch-ID') ? (int) $request->header('X-Branch-ID') : null;
+        $ledger = $this->customerService->recordCreditPayment($customer, $validated, $request->user()?->id, $branchId);
+
+        return $this->successResponse([
+            'customer' => $customer->fresh(),
+            'ledger' => $ledger,
+        ], 'Customer credit payment recorded successfully.');
+    }
+
+    /**
+     * Customer bulk import
+     */
+    public function bulkImport(Request $request): JsonResponse
+    {
+        $customers = $request->input('customers', []);
+        if (empty($customers) || !is_array($customers)) {
+            return $this->errorResponse('No valid customers array provided.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->customerService->bulkImport($customers, $request->user()?->id);
+
+        return $this->successResponse($result, "Bulk import completed. {$result['imported_count']} imported, {$result['failed_count']} failed.");
+    }
+
+    /**
+     * Export customer records
+     */
+    public function bulkExport(): JsonResponse
+    {
+        $customers = Customer::with('group')->get()->map(function ($c) {
+            return [
+                'id' => $c->id,
+                'customer_code' => $c->customer_code,
+                'name' => $c->name,
+                'phone' => $c->phone,
+                'email' => $c->email,
+                'customer_group' => $c->group?->name,
+                'customer_type' => $c->customer_type,
+                'address' => $c->address,
+                'city' => $c->city,
+                'state' => $c->state,
+                'postal_code' => $c->postal_code,
+                'tax_number' => $c->tax_number,
+                'credit_limit' => (float) $c->credit_limit,
+                'current_balance' => (float) $c->current_balance,
+                'loyalty_points' => (int) $c->loyalty_points,
+                'is_active' => $c->is_active ? 'Yes' : 'No',
+            ];
+        });
+
+        return $this->successResponse($customers, 'Customers exported successfully.');
     }
 }
 

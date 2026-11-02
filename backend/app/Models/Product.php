@@ -15,6 +15,7 @@ class Product extends Model
 
     protected $fillable = [
         'category_id',
+        'brand_id',
         'unit_id',
         'tax_slab_id',
         'name',
@@ -25,10 +26,13 @@ class Product extends Model
         'is_tax_inclusive',
         'cost_price',
         'selling_price',
+        'mrp',
         'minimum_stock',
         'has_variants',
         'is_active',
         'metadata',
+        'description',
+        'image_url',
     ];
 
     protected function casts(): array
@@ -38,6 +42,7 @@ class Product extends Model
             'is_tax_inclusive' => 'boolean',
             'cost_price' => 'decimal:2',
             'selling_price' => 'decimal:2',
+            'mrp' => 'decimal:2',
             'minimum_stock' => 'decimal:3',
             'has_variants' => 'boolean',
             'is_active' => 'boolean',
@@ -48,6 +53,21 @@ class Product extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    public function brand(): BelongsTo
+    {
+        return $this->belongsTo(Brand::class);
+    }
+
+    public function stocks(): HasMany
+    {
+        return $this->hasMany(BranchStock::class);
+    }
+
+    public function batches(): HasMany
+    {
+        return $this->hasMany(StockBatch::class);
     }
 
     public function unit(): BelongsTo

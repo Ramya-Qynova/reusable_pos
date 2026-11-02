@@ -2,9 +2,9 @@ import React from 'react'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfigProvider } from './context/ConfigContext'
-import { OfflineProvider } from './context/OfflineContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { AuthProvider } from './context/AuthContext'
+import { OfflineProvider } from './context/OfflineContext'
 import { AppRoutes } from './routes/AppRoutes'
 
 // TanStack Query client setup
@@ -23,13 +23,13 @@ export const App: React.FC = () => {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <ConfigProvider>
-          <OfflineProvider>
+          <NotificationProvider>
             <AuthProvider>
-              <NotificationProvider>
+              <OfflineProvider>
                 <AppRoutes />
-              </NotificationProvider>
+              </OfflineProvider>
             </AuthProvider>
-          </OfflineProvider>
+          </NotificationProvider>
         </ConfigProvider>
       </BrowserRouter>
     </QueryClientProvider>

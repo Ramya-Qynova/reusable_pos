@@ -298,17 +298,25 @@ class Phase3CustomersAndSuppliersTest extends TestCase
     public function test_prevents_unsafe_deletion_when_customer_has_active_references(): void
     {
         // Simulate a dependent transactional table from future phases
-        Schema::create('sales_orders', function (Blueprint $table) {
-            $table->id();
-            $table->foreignId('customer_id')->constrained('customers');
-            $table->timestamps();
-        });
+        $tableCreated = false;
+        if (!Schema::hasTable('sales_orders')) {
+            Schema::create('sales_orders', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('customer_id')->constrained('customers');
+                $table->timestamps();
+            });
+            $tableCreated = true;
+        }
 
         $customer = Customer::where('customer_code', 'CUST-00002')->first();
 
         // Create referencing record
-        \Illuminate\Support\Facades\DB::table('sales_orders')->insert([
+        $recordId = \Illuminate\Support\Facades\DB::table('sales_orders')->insertGetId([
             'customer_id' => $customer->id,
+            'branch_id' => 1,
+            'user_id' => 1,
+            'invoice_number' => 'REF-CHECK-001',
+            'order_date' => now(),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -324,8 +332,12 @@ class Phase3CustomersAndSuppliersTest extends TestCase
 
         $this->assertNotSoftDeleted('customers', ['id' => $customer->id]);
 
-        // Clean up mock table
-        Schema::dropIfExists('sales_orders');
+        // Clean up mock table or record
+        if ($tableCreated) {
+            Schema::dropIfExists('sales_orders');
+        } else {
+            \Illuminate\Support\Facades\DB::table('sales_orders')->where('id', $recordId)->delete();
+        }
     }
 
     public function test_customer_permissions_guard_mutations_from_unauthorized_users(): void

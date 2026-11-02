@@ -18,10 +18,25 @@ class ProductService
     public function getPaginatedProducts(array $filters, int $perPage = 20, ?int $branchId = null): LengthAwarePaginator
     {
         $query = Product::query()
-            ->with(['category:id,name,slug', 'unit:id,name,short_code,allow_decimals', 'variants', 'taxSlab:id,name,rate']);
+            ->with([
+                'category:id,name,slug',
+                'brand:id,name,code',
+                'unit:id,name,short_code,allow_decimals',
+                'variants',
+                'taxSlab:id,name,rate',
+                'stocks' => function ($sq) use ($branchId) {
+                    if ($branchId) {
+                        $sq->where('branch_id', $branchId);
+                    }
+                },
+            ]);
 
         if (!empty($filters['category_id'])) {
             $query->where('category_id', $filters['category_id']);
+        }
+
+        if (!empty($filters['brand_id'])) {
+            $query->where('brand_id', $filters['brand_id']);
         }
 
         if (isset($filters['is_active'])) {
@@ -43,12 +58,17 @@ class ProductService
 
         $paginator = $query->orderBy('name')->paginate($perPage);
 
-        // If a branch is specified, append effective pricing
+        // If a branch is specified, append effective pricing and stock summary
         if ($branchId) {
             $paginator->getCollection()->transform(function (Product $product) use ($branchId) {
                 $pricing = $product->getEffectivePrice($branchId);
                 $product->effective_price = $pricing['selling_price'];
                 $product->is_branch_override = $pricing['is_branch_override'];
+                
+                $stockRecord = $product->stocks->firstWhere('branch_id', $branchId);
+                $product->stock_quantity = $stockRecord ? (float) $stockRecord->quantity : 0.000;
+                $product->damaged_stock_quantity = $stockRecord ? (float) $stockRecord->damaged_quantity : 0.000;
+
                 return $product;
             });
         }
@@ -197,7 +217,7 @@ class ProductService
     {
         // 1. Check direct product barcode
         $product = Product::query()
-            ->with(['category:id,name', 'unit:id,name,short_code,allow_decimals', 'taxSlab:id,name,rate'])
+            ->with(['category:id,name', 'brand:id,name', 'unit:id,name,short_code,allow_decimals', 'taxSlab:id,name,rate'])
             ->where('barcode', $barcode)
             ->first();
 
@@ -220,7 +240,7 @@ class ProductService
 
         // 2. Check variant barcode
         $variant = ProductVariant::query()
-            ->with(['product.category:id,name', 'product.unit:id,name,short_code,allow_decimals', 'product.taxSlab:id,name,rate'])
+            ->with(['product.category:id,name', 'product.brand:id,name', 'product.unit:id,name,short_code,allow_decimals', 'product.taxSlab:id,name,rate'])
             ->where('variant_barcode', $barcode)
             ->first();
 
@@ -243,6 +263,165 @@ class ProductService
         }
 
         return null;
+    }
+
+    /**
+     * Get aggregate product catalog metrics
+     */
+    public function getDashboardStats(?int $branchId = null): array
+    {
+        $totalProducts = Product::count();
+        $activeProducts = Product::where('is_active', true)->count();
+        $totalCategories = \App\Models\Category::count();
+        $totalBrands = \App\Models\Brand::count();
+        $totalUnits = \App\Models\Unit::count();
+
+        // Calculate low stock and out of stock based on branch_stocks if available
+        $lowStockCount = 0;
+        $outOfStockCount = 0;
+
+        $products = Product::with(['stocks' => function ($sq) use ($branchId) {
+            if ($branchId) {
+                $sq->where('branch_id', $branchId);
+            }
+        }])->get();
+
+        foreach ($products as $prod) {
+            $stockQty = $branchId 
+                ? (float) ($prod->stocks->firstWhere('branch_id', $branchId)?->quantity ?? 0)
+                : (float) $prod->stocks->sum('quantity');
+
+            if ($stockQty <= 0) {
+                $outOfStockCount++;
+            } elseif ($stockQty <= (float) $prod->minimum_stock) {
+                $lowStockCount++;
+            }
+        }
+
+        return [
+            'total_products' => $totalProducts,
+            'active_products' => $activeProducts,
+            'total_categories' => $totalCategories,
+            'total_brands' => $totalBrands,
+            'total_units' => $totalUnits,
+            'low_stock_count' => $lowStockCount,
+            'out_of_stock_count' => $outOfStockCount,
+        ];
+    }
+
+    /**
+     * Generate unique barcode (e.g. EAN13 or code128 prefix)
+     */
+    public function generateUniqueBarcode(string $symbology = 'CODE128'): string
+    {
+        $prefix = \App\Models\AppSetting::get('barcode_prefix', 'GM');
+        
+        do {
+            if (strtoupper($symbology) === 'EAN13') {
+                // Generate 12 digits + checksum
+                $digits = '890' . str_pad((string) random_int(100000000, 999999999), 9, '0', STR_PAD_LEFT);
+                $checksum = $this->calculateEan13Checksum($digits);
+                $code = $digits . $checksum;
+            } else {
+                $code = $prefix . date('y') . str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+            }
+            $exists = Product::where('barcode', $code)->exists() || ProductVariant::where('variant_barcode', $code)->exists();
+        } while ($exists);
+
+        return $code;
+    }
+
+    private function calculateEan13Checksum(string $digits): int
+    {
+        $sum = 0;
+        for ($i = 0; $i < 12; $i++) {
+            $digit = (int) $digits[$i];
+            $sum += ($i % 2 === 0) ? $digit : $digit * 3;
+        }
+        $remainder = $sum % 10;
+        return ($remainder === 0) ? 0 : 10 - $remainder;
+    }
+
+    /**
+     * Bulk import products
+     */
+    public function bulkImport(array $rows, ?int $userId = null): array
+    {
+        $imported = 0;
+        $failed = 0;
+        $errors = [];
+
+        foreach ($rows as $index => $row) {
+            try {
+                if (empty($row['name'])) {
+                    throw new \InvalidArgumentException("Row " . ($index + 1) . ": Product Name is required.");
+                }
+
+                $sku = !empty($row['sku']) ? $row['sku'] : 'SKU-' . strtoupper(Str::random(8));
+                if (Product::where('sku', $sku)->exists()) {
+                    throw new \InvalidArgumentException("Row " . ($index + 1) . ": Duplicate SKU '{$sku}'.");
+                }
+
+                $barcode = !empty($row['barcode']) ? $row['barcode'] : null;
+                if ($barcode && Product::where('barcode', $barcode)->exists()) {
+                    throw new \InvalidArgumentException("Row " . ($index + 1) . ": Duplicate Barcode '{$barcode}'.");
+                }
+
+                $category = !empty($row['category_id']) 
+                    ? \App\Models\Category::find($row['category_id']) 
+                    : \App\Models\Category::firstOrCreate(['name' => $row['category'] ?? 'General'], ['slug' => Str::slug($row['category'] ?? 'general')]);
+
+                $unit = !empty($row['unit_id']) 
+                    ? \App\Models\Unit::find($row['unit_id']) 
+                    : \App\Models\Unit::firstOrCreate(['short_code' => $row['unit'] ?? 'pcs'], ['name' => $row['unit'] ?? 'Pieces', 'allow_decimals' => false]);
+
+                $brandId = !empty($row['brand_id']) ? (int) $row['brand_id'] : null;
+                if (!$brandId && !empty($row['brand'])) {
+                    $brand = Brand::firstOrCreate(['name' => $row['brand']], ['code' => 'BR-' . strtoupper(Str::random(4))]);
+                    $brandId = $brand->id;
+                }
+
+                $costPrice = isset($row['cost_price']) ? (float) $row['cost_price'] : 0.00;
+                $sellingPrice = isset($row['selling_price']) ? (float) $row['selling_price'] : ($costPrice * 1.2);
+                $mrp = isset($row['mrp']) ? (float) $row['mrp'] : ($sellingPrice * 1.1);
+
+                $product = Product::create([
+                    'category_id' => $category->id,
+                    'unit_id' => $unit->id,
+                    'brand_id' => $brandId,
+                    'name' => $row['name'],
+                    'sku' => $sku,
+                    'barcode' => $barcode,
+                    'hsn_code' => $row['hsn_code'] ?? null,
+                    'tax_rate' => isset($row['tax_rate']) ? (float) $row['tax_rate'] : 0.00,
+                    'cost_price' => $costPrice,
+                    'selling_price' => $sellingPrice,
+                    'mrp' => $mrp,
+                    'minimum_stock' => isset($row['minimum_stock']) ? (float) $row['minimum_stock'] : 5.000,
+                    'description' => $row['description'] ?? null,
+                    'is_active' => true,
+                ]);
+
+                // Create initial branch stock if specified
+                if (!empty($row['initial_stock'])) {
+                    \App\Models\BranchStock::updateOrCreate(
+                        ['branch_id' => 1, 'product_id' => $product->id, 'variant_id' => null],
+                        ['quantity' => (float) $row['initial_stock']]
+                    );
+                }
+
+                $imported++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $errors[] = $e->getMessage();
+            }
+        }
+
+        return [
+            'imported_count' => $imported,
+            'failed_count' => $failed,
+            'errors' => $errors,
+        ];
     }
 }
 

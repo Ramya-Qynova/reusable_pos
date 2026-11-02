@@ -2,39 +2,39 @@ import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { MainLayout } from '../components/layout/MainLayout'
 import DashboardPage from '../pages/DashboardPage'
+import SalesPage from '../pages/SalesPage'
 import ProductsPage from '../pages/ProductsPage'
 import CustomersPage from '../pages/CustomersPage'
 import SuppliersPage from '../pages/SuppliersPage'
+import { InventoryPage } from '../pages/InventoryPage'
+import { PurchasesPage } from '../pages/PurchasesPage'
+import { SettingsPage } from '../pages/SettingsPage'
 import ModulePlaceholder from '../pages/ModulePlaceholder'
 
 export const AppRoutes: React.FC = () => {
   return (
     <MainLayout>
       <Routes>
-        {/* Phase 1: Fully Developed Page */}
+        {/* Dashboard */}
         <Route path="/" element={<DashboardPage />} />
 
-        {/* 10 Main Navigation Modules */}
-        <Route
-          path="/sales"
-          element={<ModulePlaceholder moduleId="sales" title="Sales" subtitle="POS billing, order management, invoices, and returns." />}
-        />
-        {/* Phase 2: Fully Developed Products Page */}
+        {/* Sales & POS */}
+        <Route path="/sales" element={<SalesPage />} />
+
+        {/* Module 1: Products */}
         <Route path="/products" element={<ProductsPage />} />
-        <Route
-          path="/inventory"
-          element={<ModulePlaceholder moduleId="inventory" title="Inventory" subtitle="Stock tracking, stock adjustment, transfer, and low stock." />}
-        />
-        {/* Phase 3: Fully Developed Customers Master */}
+
+        {/* Module 2: Inventory */}
+        <Route path="/inventory" element={<InventoryPage />} />
+
+        {/* Module 3: Purchases */}
+        <Route path="/purchases" element={<PurchasesPage />} />
+
+        {/* Module 4: Customers Master */}
         <Route path="/customers" element={<CustomersPage />} />
 
-        {/* Phase 3: Fully Developed Suppliers Master */}
+        {/* Suppliers Master */}
         <Route path="/suppliers" element={<SuppliersPage />} />
-
-        <Route
-          path="/purchases"
-          element={<ModulePlaceholder moduleId="purchases" title="Purchases" subtitle="Vendor management, purchase orders, and goods receipt (GRN)." />}
-        />
 
         <Route
           path="/finance"
@@ -49,12 +49,11 @@ export const AppRoutes: React.FC = () => {
         />
         <Route
           path="/users"
-          element={<ModulePlaceholder moduleId="users" title="Users" subtitle="Staff directory, cashier shifts, and role-based access control." />}
+          element={<Navigate to="/settings" replace />}
         />
-        <Route
-          path="/settings"
-          element={<ModulePlaceholder moduleId="settings" title="Settings" subtitle="Store setup, receipt printers, taxation, and vertical modules." />}
-        />
+
+        {/* Module 5: Settings */}
+        <Route path="/settings" element={<SettingsPage />} />
 
         {/* Offline fallback redirect */}
         <Route path="/offline" element={<Navigate to="/" replace />} />

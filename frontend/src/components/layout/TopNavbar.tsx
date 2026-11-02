@@ -13,14 +13,16 @@ import { NAVIGATION_ITEMS } from '../../config/navigation'
 import { useOffline } from '../../context/OfflineContext'
 import { useNotification } from '../../context/NotificationContext'
 import { useAuth } from '../../context/AuthContext'
+import { SyncCenterModal } from '../common/SyncCenterModal'
 import { cn } from '../../utils/cn'
 
 export const TopNavbar: React.FC = () => {
-  const { isOnline, setSimulatedOffline } = useOffline()
+  const { isOnline, pendingTransactionsCount } = useOffline()
   const { showNotification } = useNotification()
   const { user, activeRole, switchDemoRole, logout } = useAuth()
   const location = useLocation()
 
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [unreadNotifications, setUnreadNotifications] = useState(1)
@@ -102,30 +104,38 @@ export const TopNavbar: React.FC = () => {
 
           {/* Right: Minimal Utility Icons (Status, Bell, Profile, Mobile Menu) */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* 1. Small Online/Offline status indicator (no text) */}
+            {/* 1. Small Online/Offline status indicator */}
             <button
               type="button"
-              onClick={() => setSimulatedOffline(isOnline)}
+              onClick={() => setIsSyncModalOpen(true)}
               title={
                 isOnline
-                  ? 'System Online (Click to simulate offline mode)'
-                  : 'System Offline (Click to simulate online mode)'
+                  ? `System Online • ${pendingTransactionsCount} pending sync (Click to open Sync Center)`
+                  : `System Offline • ${pendingTransactionsCount} pending local (Click to open Sync Center)`
               }
               aria-label={isOnline ? 'System Online' : 'System Offline'}
               className={cn(
-                'w-8 h-8 rounded-lg flex items-center justify-center border transition-all cursor-pointer shrink-0',
+                'relative h-8 px-2 rounded-lg flex items-center gap-1.5 border transition-all cursor-pointer shrink-0 text-xs font-medium',
                 isOnline
                   ? 'bg-white/10 border-white/20 hover:bg-white/20 text-white'
                   : 'bg-amber-500/25 border-amber-300/40 hover:bg-amber-500/35 text-amber-200'
               )}
             >
               {isOnline ? (
-                <span className="relative flex h-2.5 w-2.5">
+                <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
                 </span>
               ) : (
-                <WifiOff className="w-4 h-4 text-amber-300" />
+                <WifiOff className="w-3.5 h-3.5 text-amber-300" />
+              )}
+              <span className="hidden sm:inline text-[11.5px] font-semibold">
+                {isOnline ? 'Online' : 'Offline'}
+              </span>
+              {pendingTransactionsCount > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-900 font-extrabold text-[10px]">
+                  {pendingTransactionsCount}
+                </span>
               )}
             </button>
 
@@ -294,6 +304,12 @@ export const TopNavbar: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Offline Sync Center Modal */}
+      <SyncCenterModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+      />
     </header>
   )
 }

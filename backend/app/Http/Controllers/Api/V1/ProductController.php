@@ -34,12 +34,14 @@ class ProductController extends Controller
         $units = Unit::query()->orderBy('name')->get();
         $taxSlabs = TaxSlab::query()->get();
         $branches = Branch::query()->where('is_active', true)->get(['id', 'name', 'branch_code', 'location', 'is_main_branch']);
+        $brands = \App\Models\Brand::query()->where('is_active', true)->orderBy('name')->get(['id', 'name', 'code']);
 
         return $this->successResponse([
             'categories' => $categories,
             'units' => $units,
             'tax_slabs' => $taxSlabs,
             'branches' => $branches,
+            'brands' => $brands,
         ], 'Catalog metadata retrieved successfully.');
     }
 
@@ -209,6 +211,80 @@ class ProductController extends Controller
             $branchPrice->load(['branch:id,name,branch_code', 'variant']),
             'Branch price configured successfully.'
         );
+    }
+
+    /**
+     * Get aggregate statistics for product dashboard
+     */
+    public function dashboardStats(Request $request): JsonResponse
+    {
+        $branchId = $request->header('X-Branch-ID') ? (int) $request->header('X-Branch-ID') : ($request->input('branch_id') ? (int) $request->input('branch_id') : null);
+        $stats = $this->productService->getDashboardStats($branchId);
+
+        return $this->successResponse($stats, 'Product dashboard statistics retrieved successfully.');
+    }
+
+    /**
+     * Generate unique barcode with symbology
+     */
+    public function generateBarcode(Request $request): JsonResponse
+    {
+        $symbology = $request->input('symbology', 'CODE128');
+        $barcode = $this->productService->generateUniqueBarcode($symbology);
+
+        return $this->successResponse([
+            'barcode' => $barcode,
+            'symbology' => $symbology,
+        ], 'Barcode generated successfully.');
+    }
+
+    /**
+     * Bulk import products from array or JSON
+     */
+    public function bulkImport(Request $request): JsonResponse
+    {
+        $products = $request->input('products', []);
+        if (empty($products) || !is_array($products)) {
+            return $this->errorResponse('No valid products array provided for bulk import.', Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        $result = $this->productService->bulkImport($products, $request->user()?->id);
+
+        return $this->successResponse($result, "Bulk import completed. {$result['imported_count']} imported, {$result['failed_count']} failed.");
+    }
+
+    /**
+     * Export products as flat structure
+     */
+    public function bulkExport(Request $request): JsonResponse
+    {
+        $branchId = $request->header('X-Branch-ID') ? (int) $request->header('X-Branch-ID') : ($request->input('branch_id') ? (int) $request->input('branch_id') : null);
+
+        $products = Product::with(['category', 'brand', 'unit', 'stocks' => function ($sq) use ($branchId) {
+            if ($branchId) {
+                $sq->where('branch_id', $branchId);
+            }
+        }])->get()->map(function ($p) use ($branchId) {
+            $stockQty = $branchId ? (float) ($p->stocks->firstWhere('branch_id', $branchId)?->quantity ?? 0) : (float) $p->stocks->sum('quantity');
+            return [
+                'id' => $p->id,
+                'name' => $p->name,
+                'sku' => $p->sku,
+                'barcode' => $p->barcode,
+                'category' => $p->category?->name,
+                'brand' => $p->brand?->name,
+                'unit' => $p->unit?->short_code,
+                'cost_price' => (float) $p->cost_price,
+                'selling_price' => (float) $p->selling_price,
+                'mrp' => (float) $p->mrp,
+                'tax_rate' => (float) $p->tax_rate,
+                'minimum_stock' => (float) $p->minimum_stock,
+                'current_stock' => $stockQty,
+                'is_active' => $p->is_active ? 'Yes' : 'No',
+            ];
+        });
+
+        return $this->successResponse($products, 'Products exported successfully.');
     }
 }
 

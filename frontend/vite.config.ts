@@ -8,6 +8,20 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    {
+      name: 'pwa-entry-point-fallback',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          if (req.url && req.url.includes('@vite-plugin-pwa')) {
+            res.setHeader('Content-Type', 'application/javascript')
+            res.statusCode = 200
+            res.end('/* pwa fallback stub */')
+            return
+          }
+          next()
+        })
+      },
+    },
   ],
   resolve: {
     alias: {

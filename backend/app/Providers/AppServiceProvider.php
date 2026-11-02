@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Services\Inventory\StockServiceBridge;
+use App\Services\Inventory\StockServiceInterface;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -11,7 +13,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(StockServiceInterface::class, StockServiceBridge::class);
     }
 
     /**
