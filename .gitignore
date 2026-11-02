@@ -35,6 +35,11 @@ backend/storage/*.key
 .env
 .env.*
 !.env.example
+!backend/.env.example
+!frontend/.env.example
+*.sqlite
+*.sqlite3
+*.sqlite-journal
 
 # Backend generated files
 backend/storage/logs/*
